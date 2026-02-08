@@ -19,6 +19,12 @@ describe("step-runner", () => {
       getConsoleMessages: vi.fn(),
       getNetworkResponses: vi.fn(),
       getDomSnapshot: vi.fn(),
+      captureScreenshot: vi.fn(),
+      select: vi.fn(),
+      pressKey: vi.fn(),
+      hover: vi.fn(),
+      switchFrame: vi.fn(),
+      handleDialog: vi.fn(),
       close: vi.fn(),
       addMockRule: vi.fn(),
     };
@@ -836,6 +842,336 @@ describe("step-runner", () => {
 
       // Should not throw when called without callback
       expect(async () => await runSteps(mockClient, testDef)).not.toThrow();
+    });
+  });
+
+  describe("screenshot step", () => {
+    it("captures screenshot and returns base64 data", async () => {
+      mockClient.captureScreenshot.mockResolvedValueOnce("iVBORw0KGgo=");
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { screenshot: {} } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+      expect(mockClient.captureScreenshot).toHaveBeenCalledTimes(1);
+    });
+
+    it("stores screenshot in vars when as is provided", async () => {
+      mockClient.captureScreenshot.mockResolvedValueOnce("base64data");
+      mockClient.evaluate.mockResolvedValueOnce(true);
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { screenshot: { as: "snap" } } as any,
+          { eval: "true" },
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+    });
+
+    it("returns failed when screenshot fails", async () => {
+      mockClient.captureScreenshot.mockRejectedValueOnce(new Error("No page"));
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { screenshot: {} } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("failed");
+      expect((result as any).error).toContain("No page");
+    });
+  });
+
+  describe("select step", () => {
+    it("selects an option in a dropdown", async () => {
+      mockClient.select.mockResolvedValueOnce(undefined);
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { select: { selector: "select#country", value: "US" } } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+      expect(mockClient.select).toHaveBeenCalledWith("select#country", "US");
+    });
+
+    it("fails with missing selector", async () => {
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { select: { value: "US" } } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("failed");
+    });
+  });
+
+  describe("press_key step", () => {
+    it("dispatches keyboard event", async () => {
+      mockClient.pressKey.mockResolvedValueOnce(undefined);
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { press_key: { key: "Enter" } } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+      expect(mockClient.pressKey).toHaveBeenCalledWith("Enter", undefined);
+    });
+
+    it("passes modifiers to pressKey", async () => {
+      mockClient.pressKey.mockResolvedValueOnce(undefined);
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { press_key: { key: "a", modifiers: ["ctrl"] } } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+      expect(mockClient.pressKey).toHaveBeenCalledWith("a", ["ctrl"]);
+    });
+
+    it("fails with missing key", async () => {
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { press_key: {} } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("failed");
+    });
+  });
+
+  describe("hover step", () => {
+    it("hovers over an element", async () => {
+      mockClient.hover.mockResolvedValueOnce(undefined);
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { hover: { selector: ".tooltip-trigger" } } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+      expect(mockClient.hover).toHaveBeenCalledWith(".tooltip-trigger");
+    });
+
+    it("fails with missing selector", async () => {
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { hover: {} } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("failed");
+    });
+  });
+
+  describe("switch_frame step", () => {
+    it("switches to iframe by selector", async () => {
+      mockClient.switchFrame.mockResolvedValueOnce(undefined);
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { switch_frame: { selector: "iframe#content" } } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+      expect(mockClient.switchFrame).toHaveBeenCalledWith("iframe#content");
+    });
+
+    it("switches back to main frame when no selector", async () => {
+      mockClient.switchFrame.mockResolvedValueOnce(undefined);
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { switch_frame: {} } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+      expect(mockClient.switchFrame).toHaveBeenCalledWith(undefined);
+    });
+  });
+
+  describe("handle_dialog step", () => {
+    it("configures dialog handler with accept", async () => {
+      mockClient.handleDialog.mockResolvedValueOnce(undefined);
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { handle_dialog: { action: "accept" } } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+      expect(mockClient.handleDialog).toHaveBeenCalledWith("accept", undefined);
+    });
+
+    it("configures dialog handler with dismiss and text", async () => {
+      mockClient.handleDialog.mockResolvedValueOnce(undefined);
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { handle_dialog: { action: "dismiss", text: "no thanks" } } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+      expect(mockClient.handleDialog).toHaveBeenCalledWith("dismiss", "no thanks");
+    });
+
+    it("fails with invalid action", async () => {
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { handle_dialog: { action: "invalid" } } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("failed");
+    });
+  });
+
+  describe("conditional steps (if field)", () => {
+    it("skips step when if condition is falsy", async () => {
+      mockClient.evaluate.mockResolvedValueOnce(false); // if condition
+      // No second call needed — step is skipped
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { eval: "document.title", if: "false" } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+      // evaluate called once for the condition
+      expect(mockClient.evaluate).toHaveBeenCalledTimes(1);
+    });
+
+    it("executes step when if condition is truthy", async () => {
+      mockClient.evaluate
+        .mockResolvedValueOnce(true)  // if condition
+        .mockResolvedValueOnce("hello"); // eval step
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { eval: "document.title", if: "true" } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+      // evaluate called twice: once for condition, once for step
+      expect(mockClient.evaluate).toHaveBeenCalledTimes(2);
+    });
+
+    it("fails step when if condition throws", async () => {
+      mockClient.evaluate.mockRejectedValueOnce(new Error("ReferenceError"));
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { eval: "document.title", if: "undefinedVar" } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("failed");
+      expect((result as any).error).toContain("ReferenceError");
+    });
+
+    it("does not store variable when step is skipped", async () => {
+      mockClient.evaluate
+        .mockResolvedValueOnce(false)  // if condition — falsy, skip
+        .mockResolvedValueOnce(true);  // second step, uses unset $vars
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { eval: "'should not store'", as: "val", if: "false" } as any,
+          { eval: "true" },
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+    });
+
+    it("emits skipped flag in step:pass event", async () => {
+      const events: any[] = [];
+      mockClient.evaluate.mockResolvedValueOnce(false); // if condition
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { eval: "1+1", if: "false" } as any,
+        ],
+      };
+
+      await runSteps(mockClient, testDef, (event) => {
+        events.push(event);
+      });
+
+      const passEvent = events.find(e => e.type === "step:pass");
+      expect(passEvent).toBeDefined();
+      expect(passEvent?.skipped).toBe(true);
+    });
+
+    it("conditional works with non-eval steps", async () => {
+      mockClient.evaluate.mockResolvedValueOnce(false); // if condition
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { click: { selector: ".btn" }, if: "false" } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+      expect(mockClient.click).not.toHaveBeenCalled();
     });
   });
 });

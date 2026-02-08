@@ -73,7 +73,11 @@ export type WsMessage =
       url: string;
       status: number;
       duration_ms: number;
-    };
+    }
+  | { type: 'suite:start'; total: number }
+  | { type: 'suite:test_start'; testId: string; testName: string; index: number }
+  | { type: 'suite:test_complete'; testId: string; testName: string; index: number; status: 'passed' | 'failed' | 'skipped'; duration_ms: number; error?: string }
+  | { type: 'suite:complete'; result: any };
 
 /**
  * Run Store interface
@@ -203,9 +207,12 @@ export const useRunStore = create<RunStore>((set, get) => ({
       }
 
       default: {
-        // Handle unknown message types gracefully
-        const _exhaustive: never = message;
-        console.warn('Unknown WebSocket message type:', _exhaustive);
+        // Handle suite events and other unknown message types gracefully
+        if (message.type.startsWith('suite:')) {
+          // Suite events are handled at the UI level if needed
+          break;
+        }
+        console.warn('Unknown WebSocket message type:', message.type);
       }
     }
   },

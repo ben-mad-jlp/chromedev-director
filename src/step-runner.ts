@@ -44,6 +44,12 @@ function getStepType(step: StepDef): string {
   if ("network_check" in step) return "network_check";
   if ("mock_network" in step) return "mock_network";
   if ("run_test" in step) return "run_test";
+  if ("screenshot" in step) return "screenshot";
+  if ("select" in step) return "select";
+  if ("press_key" in step) return "press_key";
+  if ("hover" in step) return "hover";
+  if ("switch_frame" in step) return "switch_frame";
+  if ("handle_dialog" in step) return "handle_dialog";
   return "unknown";
 }
 
@@ -229,8 +235,8 @@ async function runTestInner(
     const step = interpolateStep(rawStep, testDef.env || {}, vars);
     const result = await executeStep(step, client, vars, onEvent, projectRoot, context);
 
-    // Store variable if eval step has 'as' field
-    if ("as" in step && step.as && "value" in result && result.success) {
+    // Store variable if eval step has 'as' field (not skipped)
+    if ("as" in step && step.as && "value" in result && result.success && !result.skipped) {
       vars[step.as] = result.value;
     }
 
@@ -268,6 +274,7 @@ async function runTestInner(
       label,
       nested: null,
       duration_ms: duration,
+      ...(result.skipped ? { skipped: true } : {}),
     });
   }
 
@@ -417,8 +424,8 @@ export async function runSteps(
         context
       );
 
-      // Store result in vars if step has `as` field (before checking failure)
-      if ("as" in step && step.as && result.success) {
+      // Store result in vars if step has `as` field (not skipped, not failed)
+      if ("as" in step && step.as && result.success && !result.skipped) {
         vars[step.as] = result.value;
       }
 
@@ -457,6 +464,7 @@ export async function runSteps(
         label,
         nested: null,
         duration_ms: duration,
+        ...(result.skipped ? { skipped: true } : {}),
       });
     } catch (error) {
       const duration = Date.now() - stepStartTime;
@@ -503,9 +511,10 @@ export async function runSteps(
  */
 async function collectDiagnostics(
   client: CDPClientInterface
-): Promise<{ console_errors: string[]; dom_snapshot?: string }> {
+): Promise<{ console_errors: string[]; dom_snapshot?: string; screenshot?: string }> {
   let console_errors: string[] = [];
   let dom_snapshot: string | undefined;
+  let screenshot: string | undefined;
   try {
     const messages = await client.getConsoleMessages();
     if (messages) {
@@ -519,7 +528,16 @@ async function collectDiagnostics(
   } catch {
     // Client may not be connected
   }
-  return { console_errors, ...(dom_snapshot ? { dom_snapshot } : {}) };
+  try {
+    screenshot = await client.captureScreenshot();
+  } catch {
+    // Client may not be connected
+  }
+  return {
+    console_errors,
+    ...(dom_snapshot ? { dom_snapshot } : {}),
+    ...(screenshot ? { screenshot } : {}),
+  };
 }
 
 /**
@@ -603,8 +621,16 @@ async function executeStep(
   projectRoot: string = process.cwd(),
   context: RunContext = { visitedTests: new Set() },
   isHook: boolean = false
-): Promise<{ success: boolean; error?: string; value?: unknown }> {
+): Promise<{ success: boolean; error?: string; value?: unknown; skipped?: boolean }> {
   try {
+    // Check conditional — if the `if` field is present, evaluate it first
+    if ("if" in step && step.if != null) {
+      const conditionResult = await client.evaluate(step.if);
+      if (!conditionResult) {
+        return { success: true, skipped: true };
+      }
+    }
+
     // Dispatch to appropriate handler based on step type
     if ("eval" in step) {
       return await evalStep(step, client, vars, isHook);
@@ -644,6 +670,30 @@ async function executeStep(
 
     if ("run_test" in step) {
       return await runTestStep(step, client, vars, onEvent, projectRoot, context);
+    }
+
+    if ("screenshot" in step) {
+      return await screenshotStep(step, client, vars);
+    }
+
+    if ("select" in step) {
+      return await selectStep(step, client, vars);
+    }
+
+    if ("press_key" in step) {
+      return await pressKeyStep(step, client, vars);
+    }
+
+    if ("hover" in step) {
+      return await hoverStep(step, client, vars);
+    }
+
+    if ("switch_frame" in step) {
+      return await switchFrameStep(step, client, vars);
+    }
+
+    if ("handle_dialog" in step) {
+      return await handleDialogStep(step, client, vars);
     }
 
     return {
@@ -1094,6 +1144,151 @@ async function mockNetworkStep(
       step.mock_network.delay
     );
 
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Execute a screenshot step
+ */
+async function screenshotStep(
+  step: any,
+  client: CDPClientInterface,
+  vars: Record<string, unknown>
+): Promise<{ success: boolean; error?: string; value?: unknown }> {
+  try {
+    const data = await client.captureScreenshot();
+    if (step.screenshot?.as) {
+      vars[step.screenshot.as] = data;
+    }
+    return { success: true, value: data };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Execute a select step
+ */
+async function selectStep(
+  step: any,
+  client: CDPClientInterface,
+  vars: Record<string, unknown>
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (!step.select || typeof step.select.selector !== "string" || typeof step.select.value !== "string") {
+      return {
+        success: false,
+        error: "select step requires selector and value strings",
+      };
+    }
+
+    await client.select(step.select.selector, step.select.value);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Execute a press_key step
+ */
+async function pressKeyStep(
+  step: any,
+  client: CDPClientInterface,
+  vars: Record<string, unknown>
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (!step.press_key || typeof step.press_key.key !== "string") {
+      return {
+        success: false,
+        error: "press_key step requires key string",
+      };
+    }
+
+    await client.pressKey(step.press_key.key, step.press_key.modifiers);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Execute a hover step
+ */
+async function hoverStep(
+  step: any,
+  client: CDPClientInterface,
+  vars: Record<string, unknown>
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (!step.hover || typeof step.hover.selector !== "string") {
+      return {
+        success: false,
+        error: "hover step requires selector string",
+      };
+    }
+
+    await client.hover(step.hover.selector);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Execute a switch_frame step
+ */
+async function switchFrameStep(
+  step: any,
+  client: CDPClientInterface,
+  vars: Record<string, unknown>
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await client.switchFrame(step.switch_frame?.selector);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Execute a handle_dialog step
+ */
+async function handleDialogStep(
+  step: any,
+  client: CDPClientInterface,
+  vars: Record<string, unknown>
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (!step.handle_dialog || !["accept", "dismiss"].includes(step.handle_dialog.action)) {
+      return {
+        success: false,
+        error: 'handle_dialog step requires action ("accept" or "dismiss")',
+      };
+    }
+
+    await client.handleDialog(step.handle_dialog.action, step.handle_dialog.text);
     return { success: true };
   } catch (error) {
     return {

@@ -8,7 +8,8 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { runTest } from "./step-runner.js";
-import { TestDef, TestResult, SavedTest } from "./types.js";
+import { runSuite } from "./suite-runner.js";
+import { TestDef, TestResult, SavedTest, SuiteResult } from "./types.js";
 import * as storageModule from "./storage.js";
 
 /**
@@ -668,6 +669,33 @@ InputDef = { name: string, label: string, type: 'text' | 'number' | 'boolean', d
 - **mock_network** — Intercept requests matching a glob pattern and return a mock response.
   \`{ mock_network: { match: "*api/users*", status: 200, body: [{ id: 1, name: "Test" }] } }\`
 
+- **screenshot** — Capture a PNG screenshot. Use \`as\` to store base64 data in \`$vars\`.
+  \`{ screenshot: { as: "loginScreen" } }\`
+
+- **select** — Select an option in a native \`<select>\` dropdown.
+  \`{ select: { selector: "select#country", value: "US" } }\`
+
+- **press_key** — Dispatch a keyboard event. Supports modifier keys.
+  \`{ press_key: { key: "Enter" } }\`
+  \`{ press_key: { key: "a", modifiers: ["ctrl"] } }\`
+
+- **hover** — Hover over an element (dispatches mouseMoved to center of element).
+  \`{ hover: { selector: ".dropdown-trigger" } }\`
+
+- **switch_frame** — Switch execution context to an iframe, or back to main frame.
+  \`{ switch_frame: { selector: "iframe#content" } }\` — switch to iframe
+  \`{ switch_frame: {} }\` — return to main frame
+
+- **handle_dialog** — Configure auto-handling for JS dialogs (alert/confirm/prompt).
+  \`{ handle_dialog: { action: "accept" } }\`
+  \`{ handle_dialog: { action: "accept", text: "yes" } }\`
+
+## Conditional steps
+
+Any step can have an \`if\` field with a JS expression. If the expression evaluates to falsy, the step is silently skipped.
+\`{ click: { selector: ".optional-btn" }, if: "document.querySelector('.optional-btn')" }\`
+If the \`if\` expression throws, the step fails. If an eval step with \`as\` is skipped, the variable is NOT set.
+
 ## mock_network details
 
 - \`match\` uses glob patterns: \`*api/users*\` matches any URL containing \`api/users\`
@@ -709,6 +737,91 @@ InputDef = { name: string, label: string, type: 'text' | 'number' | 'boolean', d
   };
 
   /**
+   * Tool: run_suite
+   * Run a suite of tests sequentially with aggregate results
+   */
+  const runSuiteTool: ToolDef = {
+    name: "run_suite",
+    description: `Run a suite of saved tests sequentially and return aggregate results.
+
+## Input Parameters
+
+- \`tag\` (string, optional) — Run all tests matching this tag. Mutually exclusive with \`testIds\`.
+- \`testIds\` (array of strings, optional) — Run these specific tests by ID. Mutually exclusive with \`tag\`.
+- \`port\` (number, optional) — Chrome DevTools Protocol port (default: 9222)
+- \`stopOnFailure\` (boolean, optional) — Stop after first test failure (default: false)
+
+Must provide either \`tag\` or \`testIds\`.
+
+## Output
+
+\`\`\`json
+{
+  "status": "passed",
+  "total": 5,
+  "passed": 4,
+  "failed": 1,
+  "skipped": 0,
+  "duration_ms": 12345,
+  "results": [
+    { "testId": "login-flow", "testName": "Login Flow", "status": "passed", "duration_ms": 2000, "runId": "..." },
+    { "testId": "checkout", "testName": "Checkout", "status": "failed", "duration_ms": 3000, "error": "...", "runId": "..." }
+  ]
+}
+\`\`\`
+
+## Example
+
+\`\`\`json
+{ "tag": "smoke" }
+\`\`\`
+
+\`\`\`json
+{ "testIds": ["login-flow", "checkout-flow"], "stopOnFailure": true }
+\`\`\``,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        tag: {
+          type: "string",
+          description: "Run all tests matching this tag",
+        },
+        testIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "Run these specific tests by ID",
+        },
+        port: {
+          type: "number",
+          description: "Chrome DevTools Protocol port (default: 9222)",
+        },
+        stopOnFailure: {
+          type: "boolean",
+          description: "Stop after first test failure (default: false)",
+        },
+      },
+      required: [],
+    },
+    handler: async (args: Record<string, any>, ctx: { storage: Storage }): Promise<any> => {
+      const { tag, testIds, port, stopOnFailure } = args;
+
+      if (!tag && (!testIds || testIds.length === 0)) {
+        throw new Error("Either 'tag' or 'testIds' must be provided");
+      }
+
+      const result = await runSuite({
+        tag,
+        testIds,
+        port: port ?? 9222,
+        stopOnFailure: stopOnFailure ?? false,
+        storageDir: ctx.storage.storageDir,
+      });
+
+      return result;
+    },
+  };
+
+  /**
    * Tool registry — array of all available tools
    * New tools can be added by appending to this array
    */
@@ -719,6 +832,7 @@ InputDef = { name: string, label: string, type: 'text' | 'number' | 'boolean', d
     deleteTestTool,
     listResultsTool,
     getResultTool,
+    runSuiteTool,
   ];
 
   /**

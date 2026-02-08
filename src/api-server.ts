@@ -11,9 +11,10 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs';
-import { OnEvent, TestDef, TestResult, RunEvent, SavedTest, TestRun, InputDef } from './types.js';
+import { OnEvent, TestDef, TestResult, RunEvent, SavedTest, TestRun, InputDef, SuiteResult } from './types.js';
 import * as storage from './storage.js';
 import { runTest } from './step-runner.js';
+import { runSuite, OnSuiteEvent, SuiteEvent } from './suite-runner.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,7 +45,11 @@ export type WsMessage =
       duration_ms?: number;
       error?: string;
     }
-  | { type: 'run:complete'; testId: string; runId: string; status: 'passed' | 'failed' };
+  | { type: 'run:complete'; testId: string; runId: string; status: 'passed' | 'failed' }
+  | { type: 'suite:start'; total: number }
+  | { type: 'suite:test_start'; testId: string; testName: string; index: number }
+  | { type: 'suite:test_complete'; testId: string; testName: string; index: number; status: 'passed' | 'failed' | 'skipped'; duration_ms: number; error?: string }
+  | { type: 'suite:complete'; result: SuiteResult };
 
 /**
  * Active test run tracking — prevents concurrent runs
@@ -456,6 +461,54 @@ export function createApiServer(options: GuiOptions): { app: Hono; injectWebSock
       }
     } catch (error: any) {
       // Clear activeRun if not already cleared
+      activeRun = null;
+      throw error;
+    }
+  });
+
+  /**
+   * POST /api/suites/run — Execute a suite of tests
+   * Body: { tag?: string, testIds?: string[], stopOnFailure?: boolean }
+   * Must provide either tag or testIds
+   */
+  app.post('/api/suites/run', async (c: any) => {
+    try {
+      const body = await c.req.json() as any;
+      const { tag, testIds, stopOnFailure } = body;
+
+      // Validate inputs
+      if (!tag && (!testIds || !Array.isArray(testIds) || testIds.length === 0)) {
+        return c.json({ error: 'Either "tag" or "testIds" must be provided' }, 400);
+      }
+
+      // Check activeRun mutex
+      if (activeRun) {
+        return c.json({ error: 'A test or suite is already running', activeRun }, 409);
+      }
+
+      // Set a synthetic activeRun to prevent concurrent runs
+      activeRun = { testId: '__suite__', runId: `suite-${Date.now()}` };
+
+      try {
+        // Suite event handler — broadcasts to WebSocket clients
+        const onSuiteEvent: OnSuiteEvent = (event: SuiteEvent) => {
+          broadcast(event as WsMessage);
+        };
+
+        const result = await runSuite({
+          tag,
+          testIds,
+          port: options.cdpPort,
+          stopOnFailure: stopOnFailure ?? false,
+          storageDir: config.storageDir,
+          projectRoot: config.projectRoot,
+        }, onSuiteEvent);
+
+        return c.json({ result }, 200);
+      } finally {
+        activeRun = null;
+      }
+    } catch (error: any) {
       activeRun = null;
       throw error;
     }

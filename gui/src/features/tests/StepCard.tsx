@@ -24,6 +24,12 @@ function getStepType(step: StepDef): string {
   if ('network_check' in step) return 'network_check';
   if ('mock_network' in step) return 'mock_network';
   if ('run_test' in step) return 'run_test';
+  if ('screenshot' in step) return 'screenshot';
+  if ('select' in step) return 'select';
+  if ('press_key' in step) return 'press_key';
+  if ('hover' in step) return 'hover';
+  if ('switch_frame' in step) return 'switch_frame';
+  if ('handle_dialog' in step) return 'handle_dialog';
   return 'unknown';
 }
 
@@ -84,6 +90,37 @@ function getStepLabel(step: StepDef): string {
         return `Mock ${step.mock_network.match}`;
       }
       break;
+    case 'screenshot':
+      if ('screenshot' in step) {
+        return step.screenshot.as ? `Screenshot → $vars.${step.screenshot.as}` : 'Screenshot';
+      }
+      break;
+    case 'select':
+      if ('select' in step) {
+        return `Select ${step.select.selector}`;
+      }
+      break;
+    case 'press_key':
+      if ('press_key' in step) {
+        const mods = step.press_key.modifiers?.join('+');
+        return mods ? `Press ${mods}+${step.press_key.key}` : `Press ${step.press_key.key}`;
+      }
+      break;
+    case 'hover':
+      if ('hover' in step) {
+        return `Hover ${step.hover.selector}`;
+      }
+      break;
+    case 'switch_frame':
+      if ('switch_frame' in step) {
+        return step.switch_frame.selector ? `Switch to ${step.switch_frame.selector}` : 'Switch to main frame';
+      }
+      break;
+    case 'handle_dialog':
+      if ('handle_dialog' in step) {
+        return `Dialog: ${step.handle_dialog.action}`;
+      }
+      break;
   }
 
   return 'Unknown step';
@@ -116,6 +153,18 @@ function getBadgeVariant(
       return 'default'; // teal
     case 'mock_network':
       return 'outline'; // indigo
+    case 'screenshot':
+      return 'secondary';
+    case 'select':
+      return 'default';
+    case 'press_key':
+      return 'secondary';
+    case 'hover':
+      return 'secondary';
+    case 'switch_frame':
+      return 'outline';
+    case 'handle_dialog':
+      return 'outline';
     default:
       return 'default';
   }
@@ -195,6 +244,32 @@ function getStepDetails(step: StepDef): React.ReactNode {
           {step.mock_network.status}
           {step.mock_network.delay && ` (${step.mock_network.delay}ms delay)`}
         </span>
+      </div>
+    );
+  }
+
+  if ('select' in step) {
+    return (
+      <div className="text-sm text-muted-foreground mt-1">
+        <span className="font-mono">{step.select.selector}</span>
+        {' '}&rarr;{' '}
+        <span className="font-mono">{step.select.value}</span>
+      </div>
+    );
+  }
+
+  if ('hover' in step) {
+    return (
+      <div className="text-sm text-muted-foreground mt-1">
+        <span className="font-mono">{step.hover.selector}</span>
+      </div>
+    );
+  }
+
+  if ('switch_frame' in step && step.switch_frame.selector) {
+    return (
+      <div className="text-sm text-muted-foreground mt-1">
+        <span className="font-mono">{step.switch_frame.selector}</span>
       </div>
     );
   }
@@ -343,6 +418,88 @@ function getStepFullDetails(step: StepDef): React.ReactNode {
     );
   }
 
+  if ('screenshot' in step) {
+    return (
+      <div className="mt-2 space-y-1">
+        <p className="text-xs text-gray-500">Captures PNG screenshot</p>
+        {step.screenshot.as && (
+          <p className="text-xs text-gray-500">
+            Stores base64 in <span className="font-mono">$vars.{step.screenshot.as}</span>
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  if ('select' in step) {
+    return (
+      <div className="mt-2 space-y-1">
+        <p className="text-xs font-semibold text-gray-500">Selector</p>
+        <pre className="text-xs font-mono bg-gray-100 rounded p-2 whitespace-pre-wrap break-words overflow-x-auto">
+          {step.select.selector}
+        </pre>
+        <p className="text-xs font-semibold text-gray-500">Value</p>
+        <pre className="text-xs font-mono bg-gray-100 rounded p-2 whitespace-pre-wrap break-words overflow-x-auto">
+          {step.select.value}
+        </pre>
+      </div>
+    );
+  }
+
+  if ('press_key' in step) {
+    return (
+      <div className="mt-2 space-y-1">
+        <p className="text-xs font-semibold text-gray-500">Key: {step.press_key.key}</p>
+        {step.press_key.modifiers && step.press_key.modifiers.length > 0 && (
+          <p className="text-xs text-gray-500">
+            Modifiers: {step.press_key.modifiers.join(', ')}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  if ('hover' in step) {
+    return (
+      <div className="mt-2 space-y-1">
+        <p className="text-xs font-semibold text-gray-500">Selector</p>
+        <pre className="text-xs font-mono bg-gray-100 rounded p-2 whitespace-pre-wrap break-words overflow-x-auto">
+          {step.hover.selector}
+        </pre>
+      </div>
+    );
+  }
+
+  if ('switch_frame' in step) {
+    return (
+      <div className="mt-2 space-y-1">
+        {step.switch_frame.selector ? (
+          <>
+            <p className="text-xs font-semibold text-gray-500">iframe Selector</p>
+            <pre className="text-xs font-mono bg-gray-100 rounded p-2 whitespace-pre-wrap break-words overflow-x-auto">
+              {step.switch_frame.selector}
+            </pre>
+          </>
+        ) : (
+          <p className="text-xs text-gray-500">Returns to main frame</p>
+        )}
+      </div>
+    );
+  }
+
+  if ('handle_dialog' in step) {
+    return (
+      <div className="mt-2 space-y-1">
+        <p className="text-xs font-semibold text-gray-500">Action: {step.handle_dialog.action}</p>
+        {step.handle_dialog.text != null && (
+          <p className="text-xs text-gray-500">
+            Prompt text: {step.handle_dialog.text}
+          </p>
+        )}
+      </div>
+    );
+  }
+
   return null;
 }
 
@@ -418,6 +575,13 @@ export const StepCard: React.FC<StepCardProps> = ({
             <Badge variant={badgeVariant} className="text-xs">
               {stepType}
             </Badge>
+
+            {/* Conditional badge */}
+            {'if' in step && step.if != null && (
+              <Badge variant="outline" className="text-xs text-amber-600 border-amber-300">
+                if: {step.if.length > 20 ? step.if.slice(0, 20) + '...' : step.if}
+              </Badge>
+            )}
 
             {/* Step label */}
             <span className="font-medium text-sm break-words">{label}</span>

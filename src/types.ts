@@ -49,25 +49,26 @@ export interface TestDef {
  */
 export type StepDef =
   /** Execute JS in the page. `as` stores the result in `$vars.NAME`. Returns objects auto-serialized. */
-  | { label?: string; eval: string; as?: string }
+  | { label?: string; if?: string; eval: string; as?: string }
   /** Fill an input field. Dispatches input+change events so React controlled components update. */
-  | { label?: string; fill: { selector: string; value: string } }
+  | { label?: string; if?: string; fill: { selector: string; value: string } }
   /** Click an element by CSS selector. */
-  | { label?: string; click: { selector: string } }
+  | { label?: string; if?: string; click: { selector: string } }
   /** Assert a JS expression is truthy. `retry` enables polling at interval until timeout. */
   | {
       label?: string;
+      if?: string;
       assert: string;
       retry?: { interval: number; timeout: number };
     }
   /** Sleep for N milliseconds. Use after actions that trigger async renders (500-2000ms). */
-  | { label?: string; wait: number }
+  | { label?: string; if?: string; wait: number }
   /** Poll for element existence by CSS selector. */
-  | { label?: string; wait_for: { selector: string; timeout?: number } }
+  | { label?: string; if?: string; wait_for: { selector: string; timeout?: number } }
   /** Fail if console messages exist at given levels. Use `"warning"` not `"warn"` — CDP uses `"warning"`. */
-  | { label?: string; console_check: ("error" | "warn" | "warning" | "info" | "log" | "debug")[] }
+  | { label?: string; if?: string; console_check: ("error" | "warn" | "warning" | "info" | "log" | "debug")[] }
   /** Fail if any 4xx/5xx network responses were captured. */
-  | { label?: string; network_check: boolean }
+  | { label?: string; if?: string; network_check: boolean }
   /**
    * Intercept requests matching a glob pattern and return a mock response.
    * `match` uses glob: `*api/users*`. First matching rule wins — register specific patterns first.
@@ -76,6 +77,7 @@ export type StepDef =
    */
   | {
       label?: string;
+      if?: string;
       mock_network: {
         match: string;
         status: number;
@@ -84,7 +86,19 @@ export type StepDef =
       };
     }
   /** Execute another test by ID. Nested test's steps run inline; url/before/after/env are ignored. */
-  | { label?: string; run_test: string };
+  | { label?: string; if?: string; run_test: string }
+  /** Capture a PNG screenshot. Optionally store base64 in `$vars.NAME` via `as`. */
+  | { label?: string; if?: string; screenshot: { as?: string } }
+  /** Select an option in a native `<select>` dropdown. */
+  | { label?: string; if?: string; select: { selector: string; value: string } }
+  /** Dispatch a keyboard event. `key` uses DOM key names (Enter, Tab, Escape, ArrowDown, etc.). */
+  | { label?: string; if?: string; press_key: { key: string; modifiers?: ("ctrl" | "shift" | "alt" | "meta")[] } }
+  /** Hover over an element by CSS selector (dispatches mouseMoved). */
+  | { label?: string; if?: string; hover: { selector: string } }
+  /** Switch execution context to an iframe (by selector) or back to main frame (omit selector). */
+  | { label?: string; if?: string; switch_frame: { selector?: string } }
+  /** Configure auto-handling for future JS dialogs (alert/confirm/prompt). */
+  | { label?: string; if?: string; handle_dialog: { action: "accept" | "dismiss"; text?: string } };
 
 /**
  * Test execution result
@@ -104,6 +118,7 @@ export type TestResult =
       error: string;
       console_errors: string[];
       dom_snapshot?: string;
+      screenshot?: string;
       duration_ms: number;
     };
 
@@ -150,6 +165,12 @@ export interface CDPClient {
   getConsoleMessages(): Promise<Array<{ type: string; text: string }>>;
   getNetworkResponses(): Promise<NetworkResponse[]>;
   getDomSnapshot(): Promise<string>;
+  captureScreenshot(): Promise<string>;
+  select(selector: string, value: string): Promise<void>;
+  pressKey(key: string, modifiers?: string[]): Promise<void>;
+  hover(selector: string): Promise<void>;
+  switchFrame(selector?: string): Promise<void>;
+  handleDialog(action: "accept" | "dismiss", text?: string): Promise<void>;
   close(): Promise<void>;
   addMockRule(
     pattern: string,
@@ -176,6 +197,7 @@ export type RunEvent =
       label: string;
       nested: string | null;
       duration_ms: number;
+      skipped?: boolean;
     }
   | {
       type: "step:fail";
@@ -236,4 +258,29 @@ export interface DirectorConfig {
   storageDir: string;         // Root directory for storing tests and results
   resultRetentionDays: number; // How many days to keep test results (default: 30)
   port: number;               // Port for the API server (default: 3000)
+}
+
+/**
+ * Suite execution result — aggregate of multiple test runs
+ */
+export interface SuiteResult {
+  status: "passed" | "failed";
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  duration_ms: number;
+  results: SuiteTestResult[];
+}
+
+/**
+ * Individual test result within a suite run
+ */
+export interface SuiteTestResult {
+  testId: string;
+  testName: string;
+  status: "passed" | "failed" | "skipped";
+  duration_ms: number;
+  error?: string;
+  runId?: string;
 }

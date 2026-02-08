@@ -92,10 +92,21 @@ export function interpolateStep(
     ? interpolate(step.label, env, vars)
     : undefined;
 
+  // Handle if condition (common to all step types)
+  const interpolatedIf = "if" in step && step.if != null
+    ? interpolate(step.if, env, vars)
+    : undefined;
+
+  // Common fields spread
+  const common = {
+    ...(interpolatedLabel && { label: interpolatedLabel }),
+    ...(interpolatedIf != null ? { if: interpolatedIf } : {}),
+  };
+
   // eval step
   if ("eval" in step) {
     return {
-      ...(interpolatedLabel && { label: interpolatedLabel }),
+      ...common,
       eval: interpolate(step.eval, env, vars),
       ...(step.as && { as: step.as }),
     };
@@ -104,7 +115,7 @@ export function interpolateStep(
   // fill step
   if ("fill" in step) {
     return {
-      ...(interpolatedLabel && { label: interpolatedLabel }),
+      ...common,
       fill: {
         selector: interpolate(step.fill.selector, env, vars),
         value: interpolate(step.fill.value, env, vars),
@@ -115,7 +126,7 @@ export function interpolateStep(
   // click step
   if ("click" in step) {
     return {
-      ...(interpolatedLabel && { label: interpolatedLabel }),
+      ...common,
       click: {
         selector: interpolate(step.click.selector, env, vars),
       },
@@ -125,7 +136,7 @@ export function interpolateStep(
   // assert step
   if ("assert" in step) {
     return {
-      ...(interpolatedLabel && { label: interpolatedLabel }),
+      ...common,
       assert: interpolate(step.assert, env, vars),
       ...(step.retry && { retry: step.retry }),
     };
@@ -134,7 +145,7 @@ export function interpolateStep(
   // wait step
   if ("wait" in step) {
     return {
-      ...(interpolatedLabel && { label: interpolatedLabel }),
+      ...common,
       wait: step.wait,
     };
   }
@@ -142,7 +153,7 @@ export function interpolateStep(
   // wait_for step
   if ("wait_for" in step) {
     return {
-      ...(interpolatedLabel && { label: interpolatedLabel }),
+      ...common,
       wait_for: {
         selector: interpolate(step.wait_for.selector, env, vars),
         ...(step.wait_for.timeout != null ? { timeout: step.wait_for.timeout } : {}),
@@ -153,7 +164,7 @@ export function interpolateStep(
   // console_check step
   if ("console_check" in step) {
     return {
-      ...(interpolatedLabel && { label: interpolatedLabel }),
+      ...common,
       console_check: step.console_check,
     };
   }
@@ -161,7 +172,7 @@ export function interpolateStep(
   // network_check step
   if ("network_check" in step) {
     return {
-      ...(interpolatedLabel && { label: interpolatedLabel }),
+      ...common,
       network_check: step.network_check,
     };
   }
@@ -174,7 +185,7 @@ export function interpolateStep(
         : step.mock_network.body;
 
     return {
-      ...(interpolatedLabel && { label: interpolatedLabel }),
+      ...common,
       mock_network: {
         match: interpolate(step.mock_network.match, env, vars),
         status: step.mock_network.status,
@@ -182,6 +193,81 @@ export function interpolateStep(
         ...(step.mock_network.delay != null ? { delay: step.mock_network.delay } : {}),
       },
     } as StepDef;
+  }
+
+  // run_test step
+  if ("run_test" in step) {
+    return {
+      ...common,
+      run_test: typeof step.run_test === "string" ? interpolate(step.run_test, env, vars) : step.run_test,
+    };
+  }
+
+  // screenshot step
+  if ("screenshot" in step) {
+    return {
+      ...common,
+      screenshot: {
+        ...(step.screenshot.as && { as: step.screenshot.as }),
+      },
+    };
+  }
+
+  // select step
+  if ("select" in step) {
+    return {
+      ...common,
+      select: {
+        selector: interpolate(step.select.selector, env, vars),
+        value: interpolate(step.select.value, env, vars),
+      },
+    };
+  }
+
+  // press_key step
+  if ("press_key" in step) {
+    return {
+      ...common,
+      press_key: {
+        key: interpolate(step.press_key.key, env, vars),
+        ...(step.press_key.modifiers && { modifiers: step.press_key.modifiers }),
+      },
+    };
+  }
+
+  // hover step
+  if ("hover" in step) {
+    return {
+      ...common,
+      hover: {
+        selector: interpolate(step.hover.selector, env, vars),
+      },
+    };
+  }
+
+  // switch_frame step
+  if ("switch_frame" in step) {
+    return {
+      ...common,
+      switch_frame: {
+        ...(step.switch_frame.selector != null
+          ? { selector: interpolate(step.switch_frame.selector, env, vars) }
+          : {}),
+      },
+    };
+  }
+
+  // handle_dialog step
+  if ("handle_dialog" in step) {
+    return {
+      ...common,
+      handle_dialog: {
+        action: step.handle_dialog.action,
+        ...(step.handle_dialog.text != null
+          ? { text: interpolate(step.handle_dialog.text, env, vars) }
+          : {}),
+      },
+    };
   }
 
   // Fallback: return the step as-is (shouldn't reach here with valid StepDef)

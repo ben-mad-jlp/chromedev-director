@@ -52,6 +52,8 @@ export class CDPClient {
   private connected: boolean = false;
   public verbose: boolean = false;
   private onEvent?: OnEvent;
+  private currentExecutionContextId?: number;
+  private dialogHandler?: { action: "accept" | "dismiss"; text?: string };
 
   /**
    * Creates a new CDP client instance
@@ -113,6 +115,8 @@ export class CDPClient {
       this.networkResponses = [];
       this.mockRules = [];
       this.networkRequestTimes.clear();
+      this.currentExecutionContextId = undefined;
+      this.dialogHandler = undefined;
 
       // Connect to the Chrome DevTools Protocol
       this.client = await CDP({ port: this.port });
@@ -254,6 +258,19 @@ export class CDPClient {
       Fetch.requestPaused((request: any) => {
         this.handleMockRequest(request).catch((err) => {
           console.error(`Unhandled error in mock request handler: ${err}`);
+        });
+      });
+
+      // Set up listener for JavaScript dialogs (alert/confirm/prompt)
+      Page.javascriptDialogOpening(() => {
+        const handler = this.dialogHandler ?? { action: "dismiss" };
+        Page.handleJavaScriptDialog({
+          accept: handler.action === "accept",
+          ...(handler.text != null ? { promptText: handler.text } : {}),
+        }).catch((err: any) => {
+          if (this.verbose) {
+            console.error(`Error handling dialog: ${err}`);
+          }
         });
       });
 
@@ -425,6 +442,34 @@ export class CDPClient {
   }
 
   /**
+   * Evaluates JavaScript in the current execution context (main frame or iframe).
+   * Used internally by evaluate(), fill(), select(), etc.
+   */
+  private async evaluateInContext(expression: string): Promise<any> {
+    const { Runtime } = this.domains;
+
+    const evalOptions: any = {
+      expression,
+      returnByValue: true,
+      awaitPromise: true,
+    };
+
+    if (this.currentExecutionContextId != null) {
+      evalOptions.contextId = this.currentExecutionContextId;
+    }
+
+    const result = await Runtime.evaluate(evalOptions);
+
+    if (result.exceptionDetails) {
+      throw new Error(
+        `Evaluation error: ${result.exceptionDetails.text}`
+      );
+    }
+
+    return result;
+  }
+
+  /**
    * Evaluates JavaScript code in the page context
    * @param expression - The JavaScript expression to evaluate
    * @returns The result of the evaluation
@@ -435,21 +480,8 @@ export class CDPClient {
       throw new Error("CDP client is not connected");
     }
 
-    const { Runtime } = this.domains;
-
     try {
-      const result = await Runtime.evaluate({
-        expression,
-        returnByValue: true, // Ensures objects/arrays are returned as values, not remote references
-        awaitPromise: true,  // Await promise results
-      });
-
-      // Check for exceptions
-      if (result.exceptionDetails) {
-        throw new Error(
-          `Evaluation error: ${result.exceptionDetails.text}`
-        );
-      }
+      const result = await this.evaluateInContext(expression);
 
       // Return the value
       if (result.result.type === "undefined") {
@@ -494,10 +526,9 @@ export class CDPClient {
       const escapedSelector = JSON.stringify(selector);
 
       // Focus the element
-      const focusResult = await Runtime.evaluate({
-        expression: `(function() { const el = document.querySelector(${escapedSelector}); if (!el) throw new Error('Element not found'); el.focus(); return true; })()`,
-        returnByValue: true,
-      });
+      const focusResult = await this.evaluateInContext(
+        `(function() { const el = document.querySelector(${escapedSelector}); if (!el) throw new Error('Element not found'); el.focus(); return true; })()`
+      );
       if (focusResult.exceptionDetails) {
         throw new Error(`Failed to focus element: ${focusResult.exceptionDetails.text}`);
       }
@@ -537,22 +568,18 @@ export class CDPClient {
       }
 
       // Dispatch input and change events for framework compatibility (React, Vue, etc.)
-      await Runtime.evaluate({
-        expression: `(function() {
+      await this.evaluateInContext(`(function() {
           const el = document.querySelector(${escapedSelector});
           if (el) {
             el.dispatchEvent(new Event('input', { bubbles: true }));
             el.dispatchEvent(new Event('change', { bubbles: true }));
           }
-        })()`,
-        returnByValue: true,
-      });
+        })()`);
 
       // Blur the element
-      await Runtime.evaluate({
-        expression: `(function() { const el = document.querySelector(${escapedSelector}); if (el) el.blur(); })()`,
-        returnByValue: true,
-      });
+      await this.evaluateInContext(
+        `(function() { const el = document.querySelector(${escapedSelector}); if (el) el.blur(); })()`
+      );
     } catch (error) {
       throw new Error(`Failed to fill ${selector}: ${error}`);
     }
@@ -732,6 +759,200 @@ export class CDPClient {
 
     // Other node types (comments, etc.) — skip
     return "";
+  }
+
+  /**
+   * Captures a PNG screenshot of the current page
+   * @returns Base64-encoded PNG data
+   */
+  async captureScreenshot(): Promise<string> {
+    if (!this.connected) {
+      throw new Error("CDP client is not connected");
+    }
+
+    const { Page } = this.domains;
+
+    try {
+      const result = await Page.captureScreenshot({ format: "png" });
+      return result.data;
+    } catch (error) {
+      throw new Error(`Failed to capture screenshot: ${error}`);
+    }
+  }
+
+  /**
+   * Selects an option in a native <select> element
+   * @param selector - CSS selector for the <select> element
+   * @param value - The option value to select
+   */
+  async select(selector: string, value: string): Promise<void> {
+    if (!this.connected) {
+      throw new Error("CDP client is not connected");
+    }
+
+    try {
+      const escapedSelector = JSON.stringify(selector);
+      const escapedValue = JSON.stringify(value);
+
+      const result = await this.evaluateInContext(`(function() {
+        const el = document.querySelector(${escapedSelector});
+        if (!el) throw new Error('Element not found: ' + ${escapedSelector});
+        if (el.tagName.toLowerCase() !== 'select') throw new Error('Element is not a <select>: ' + ${escapedSelector});
+        el.value = ${escapedValue};
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      })()`);
+
+      if (result.exceptionDetails) {
+        throw new Error(result.exceptionDetails.text);
+      }
+    } catch (error) {
+      throw new Error(`Failed to select ${selector}: ${error}`);
+    }
+  }
+
+  /**
+   * Dispatches a keyboard event (keyDown + keyUp)
+   * @param key - DOM key name (Enter, Tab, Escape, ArrowDown, etc.)
+   * @param modifiers - Optional array of modifier keys
+   */
+  async pressKey(key: string, modifiers?: string[]): Promise<void> {
+    if (!this.connected) {
+      throw new Error("CDP client is not connected");
+    }
+
+    const { Input } = this.domains;
+
+    // Convert modifier names to CDP bitmask
+    let modifierBitmask = 0;
+    if (modifiers) {
+      for (const mod of modifiers) {
+        switch (mod.toLowerCase()) {
+          case "alt": modifierBitmask |= 1; break;
+          case "ctrl": modifierBitmask |= 2; break;
+          case "meta": modifierBitmask |= 4; break;
+          case "shift": modifierBitmask |= 8; break;
+        }
+      }
+    }
+
+    try {
+      await Input.dispatchKeyEvent({
+        type: "keyDown",
+        key,
+        modifiers: modifierBitmask,
+      });
+      await Input.dispatchKeyEvent({
+        type: "keyUp",
+        key,
+        modifiers: modifierBitmask,
+      });
+    } catch (error) {
+      throw new Error(`Failed to press key ${key}: ${error}`);
+    }
+  }
+
+  /**
+   * Hovers over an element by CSS selector
+   * @param selector - CSS selector for the element to hover
+   */
+  async hover(selector: string): Promise<void> {
+    if (!this.connected) {
+      throw new Error("CDP client is not connected");
+    }
+
+    const { DOM, Input } = this.domains;
+
+    try {
+      const { root } = await DOM.getDocument();
+      const { nodeId } = await DOM.querySelector({
+        nodeId: root.nodeId,
+        selector,
+      });
+
+      if (!nodeId) {
+        throw new Error(`Element not found: ${selector}`);
+      }
+
+      const box = await DOM.getBoxModel({ nodeId });
+      if (!box.model || !box.model.content) {
+        throw new Error(`Could not get bounds for ${selector}`);
+      }
+
+      const x1 = box.model.content[0];
+      const y1 = box.model.content[1];
+      const x2 = box.model.content[4];
+      const y2 = box.model.content[5];
+
+      const centerX = (x1 + x2) / 2;
+      const centerY = (y1 + y2) / 2;
+
+      await Input.dispatchMouseEvent({
+        type: "mouseMoved",
+        x: centerX,
+        y: centerY,
+      });
+    } catch (error) {
+      throw new Error(`Failed to hover ${selector}: ${error}`);
+    }
+  }
+
+  /**
+   * Switches execution context to an iframe or back to the main frame
+   * @param selector - CSS selector for the iframe element, or undefined to return to main frame
+   */
+  async switchFrame(selector?: string): Promise<void> {
+    if (!this.connected) {
+      throw new Error("CDP client is not connected");
+    }
+
+    if (!selector) {
+      // Return to main frame
+      this.currentExecutionContextId = undefined;
+      return;
+    }
+
+    const { DOM, Page } = this.domains;
+
+    try {
+      const { root } = await DOM.getDocument();
+      const { nodeId } = await DOM.querySelector({
+        nodeId: root.nodeId,
+        selector,
+      });
+
+      if (!nodeId) {
+        throw new Error(`iframe not found: ${selector}`);
+      }
+
+      // Get the frameId from the iframe node
+      const { node } = await DOM.describeNode({ nodeId });
+      const frameId = node.frameId;
+
+      if (!frameId) {
+        throw new Error(`Element is not an iframe: ${selector}`);
+      }
+
+      // Create an isolated world in the iframe's frame
+      const { executionContextId } = await Page.createIsolatedWorld({
+        frameId,
+        grantUniveralAccess: true,
+      });
+
+      this.currentExecutionContextId = executionContextId;
+    } catch (error) {
+      throw new Error(`Failed to switch frame ${selector}: ${error}`);
+    }
+  }
+
+  /**
+   * Configures auto-handling for future JavaScript dialogs
+   * @param action - Whether to accept or dismiss the dialog
+   * @param text - Optional text to enter in prompt dialogs
+   */
+  async handleDialog(action: "accept" | "dismiss", text?: string): Promise<void> {
+    this.dialogHandler = { action, ...(text != null ? { text } : {}) };
   }
 
   /**
