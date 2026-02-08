@@ -1,0 +1,11 @@
+node_modules/
+dist/
+gui/dist/
+gui/node_modules/
+*.tsbuildinfo
+.chromedev-director/
+.collab/
+.env
+.DS_Store
+*.bak
+*.new

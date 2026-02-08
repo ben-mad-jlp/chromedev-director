@@ -1,0 +1,782 @@
+/**
+ * Chrome DevTools Protocol (CDP) client wrapper
+ * Provides a high-level interface for interacting with Chrome via CDP
+ * Handles navigation, DOM manipulation, evaluation, mocking, and event collection
+ */
+
+import CDP from "chrome-remote-interface";
+import { OnEvent } from "./types.js";
+
+/**
+ * Represents a mock network rule for intercepting and modifying network requests
+ */
+interface MockRule {
+  pattern: RegExp;
+  status: number;
+  body?: unknown;
+  delay?: number;
+}
+
+/**
+ * Represents a collected console message
+ */
+interface StoredConsoleMessage {
+  type: string;
+  text: string;
+  timestamp: number;
+}
+
+/**
+ * Represents a collected network request with timing
+ */
+interface StoredNetworkRequest {
+  url: string;
+  method: string;
+  status: number;
+  timestamp: number;
+  startTime?: number;
+}
+
+/**
+ * Chrome DevTools Protocol client wrapper
+ * Manages connection, navigation, DOM access, and event collection
+ */
+export class CDPClient {
+  private port: number;
+  private client: any;
+  private domains: any = {};
+  private consoleMessages: StoredConsoleMessage[] = [];
+  private networkResponses: StoredNetworkRequest[] = [];
+  private networkRequestTimes: Map<string, number> = new Map();
+  private mockRules: MockRule[] = [];
+  private connected: boolean = false;
+  public verbose: boolean = false;
+  private onEvent?: OnEvent;
+
+  /**
+   * Creates a new CDP client instance
+   * @param port - The port on which Chrome DevTools Protocol server is listening
+   * @param onEvent - Optional callback for emitting console and network events
+   */
+  constructor(port: number, onEvent?: OnEvent) {
+    this.port = port;
+    this.onEvent = onEvent;
+  }
+
+  /**
+   * Converts a glob pattern to a RegExp
+   * Simple conversion: asterisk becomes .*, ? becomes .
+   * @param pattern - The glob pattern
+   * @returns A RegExp that matches the pattern
+   */
+  private globToRegExp(pattern: string): RegExp {
+    const escaped = pattern
+      .replace(/[.+^${}()|[\]\\]/g, "\\$&") // Escape special regex chars
+      .replace(/\*/g, ".*") // * becomes .*
+      .replace(/\?/g, "."); // ? becomes .
+    return new RegExp(`^${escaped}$`);
+  }
+
+  /**
+   * Escapes a string for safe use in HTML attribute values
+   */
+  private escapeAttrValue(value: string): string {
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  /**
+   * Connects to Chrome DevTools Protocol
+   * Retrieves the first page target, attaches to it,
+   * and enables necessary domains (Console, Network, Fetch)
+   * @param _url - Unused, kept for interface compatibility
+   * @throws If connection fails or attachment fails
+   */
+  async connect(_url: string): Promise<void> {
+    try {
+      // Close existing connection if reconnecting to avoid leaking
+      if (this.client) {
+        try {
+          await this.client.close();
+        } catch {
+          // Ignore close errors on stale connection
+        }
+        this.client = null;
+        this.connected = false;
+      }
+
+      // Clear accumulated state from previous runs
+      this.consoleMessages = [];
+      this.networkResponses = [];
+      this.mockRules = [];
+      this.networkRequestTimes.clear();
+
+      // Connect to the Chrome DevTools Protocol
+      this.client = await CDP({ port: this.port });
+
+      // Get list of targets (pages/tabs)
+      const { Target, Page, Console, Network, Fetch, DOM, Runtime, Input } =
+        this.client;
+
+      // Store domain instances
+      this.domains = {
+        Target,
+        Page,
+        Console,
+        Network,
+        Fetch,
+        DOM,
+        Runtime,
+        Input,
+      };
+
+      // Get the first page target (filter by type to avoid service workers, extensions, etc.)
+      const targets = await Target.getTargets();
+      if (!targets.targetInfos || targets.targetInfos.length === 0) {
+        throw new Error("No targets available");
+      }
+
+      const pageTarget = targets.targetInfos.find(
+        (t: any) => t.type === "page"
+      );
+      const targetId = pageTarget
+        ? pageTarget.targetId
+        : targets.targetInfos[0].targetId;
+
+      // Attach to the target to get a sessionId
+      const { sessionId } = await Target.attachToTarget({
+        targetId,
+        flatten: true,
+      });
+
+      // Store the session ID for later use
+      this.client.sessionId = sessionId;
+
+      // Enable domains
+      await Console.enable();
+      await Network.enable();
+      await Page.enable();
+      await DOM.enable();
+      await Runtime.enable();
+      await Fetch.enable({
+        patterns: [{ urlPattern: "*" }],
+      });
+
+      // Set up listeners for console messages
+      Console.messageAdded((message: any) => {
+        const consoleMessage = message.message;
+        const messageText = consoleMessage.text || "";
+        const messageLevel = consoleMessage.level;
+
+        this.consoleMessages.push({
+          type: messageLevel,
+          text: messageText,
+          timestamp: Date.now(),
+        });
+
+        // Emit console event in real-time
+        if (this.onEvent) {
+          try {
+            this.onEvent({
+              type: "console",
+              level: messageLevel,
+              text: messageText,
+            });
+          } catch (err) {
+            // Silently ignore listener errors to prevent test execution issues
+            if (this.verbose) {
+              console.error(`Error in onEvent callback: ${err}`);
+            }
+          }
+        }
+      });
+
+      // Set up listeners for network responses
+      Network.requestWillBeSent((request: any) => {
+        // Track when requests start for duration calculation
+        const requestId = request.requestId;
+        this.networkRequestTimes.set(requestId, Date.now());
+      });
+
+      Network.responseReceived((response: any) => {
+        const requestId = response.requestId;
+        const responseUrl = response.response.url;
+        const responseStatus = response.response.status;
+        const responseMethod = response.response.requestHeaders
+          ? Object.keys(response.response.requestHeaders).length > 0
+            ? "GET" // Default if not available in response
+            : "GET"
+          : "GET";
+
+        // Get actual method from request info if available
+        let method = responseMethod;
+        if (response.response.method) {
+          method = response.response.method;
+        }
+
+        const startTime = this.networkRequestTimes.get(requestId);
+        const duration_ms = startTime ? Date.now() - startTime : 0;
+
+        this.networkResponses.push({
+          url: responseUrl,
+          method,
+          status: responseStatus,
+          timestamp: Date.now(),
+          startTime,
+        });
+
+        // Emit network event in real-time
+        if (this.onEvent) {
+          try {
+            this.onEvent({
+              type: "network",
+              method,
+              url: responseUrl,
+              status: responseStatus,
+              duration_ms,
+            });
+          } catch (err) {
+            // Silently ignore listener errors to prevent test execution issues
+            if (this.verbose) {
+              console.error(`Error in onEvent callback: ${err}`);
+            }
+          }
+        }
+
+        // Clean up tracking data
+        this.networkRequestTimes.delete(requestId);
+      });
+
+      // Set up listener for fetch requests (for mocking)
+      Fetch.requestPaused((request: any) => {
+        this.handleMockRequest(request).catch((err) => {
+          console.error(`Unhandled error in mock request handler: ${err}`);
+        });
+      });
+
+      this.connected = true;
+    } catch (error) {
+      this.connected = false;
+      throw new Error(`Failed to connect to CDP: ${error}`);
+    }
+  }
+
+  /**
+   * Handles mock network requests by checking against registered mock rules
+   * If a rule matches, responds with the mock data; otherwise, continues the request
+   * @param request - The request object from Fetch.requestPaused
+   */
+  private async handleMockRequest(request: any): Promise<void> {
+    // Skip if connection is closing/closed to avoid WebSocket errors
+    if (!this.connected) return;
+
+    const { requestId, request: req } = request;
+    const url = req.url;
+    const method = req.method;
+
+    // Log all intercepted requests when verbose
+    if (this.verbose) {
+      console.log(`[CDP:Fetch] ${method} ${url.substring(0, 120)}`);
+    }
+
+    // Check if any mock rule matches this URL
+    for (const rule of this.mockRules) {
+      if (rule.pattern.test(url)) {
+        if (this.verbose) {
+          console.log(`[CDP:Mock] MATCH ${method} ${url.substring(0, 80)} → ${rule.status}`);
+        }
+
+        // CORS preflight: respond with 204 + CORS headers, no body
+        if (method === "OPTIONS") {
+          try {
+            await this.domains.Fetch.fulfillRequest({
+              requestId,
+              responseCode: 204,
+              responseHeaders: [
+                { name: "Access-Control-Allow-Origin", value: "*" },
+                { name: "Access-Control-Allow-Methods", value: "GET, POST, PUT, DELETE, PATCH, OPTIONS" },
+                { name: "Access-Control-Allow-Headers", value: "*" },
+                { name: "Access-Control-Max-Age", value: "86400" },
+              ],
+            });
+          } catch (error) {
+            try {
+              await this.domains.Fetch.continueRequest({ requestId });
+            } catch {
+              // Request may already be handled or cancelled
+            }
+          }
+          return;
+        }
+
+        // Match found - respond with mock data
+        const body = typeof rule.body === "string"
+          ? rule.body
+          : rule.body != null
+            ? JSON.stringify(rule.body)
+            : "";
+
+        try {
+          if (rule.delay != null && rule.delay > 0) {
+            await new Promise((resolve) => setTimeout(resolve, rule.delay));
+          }
+
+          await this.domains.Fetch.fulfillRequest({
+            requestId,
+            responseCode: rule.status,
+            responseHeaders: [
+              {
+                name: "Content-Type",
+                value: "application/json",
+              },
+              {
+                name: "Access-Control-Allow-Origin",
+                value: "*",
+              },
+              {
+                name: "Access-Control-Allow-Methods",
+                value: "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+              },
+              {
+                name: "Access-Control-Allow-Headers",
+                value: "*",
+              },
+            ],
+            body: Buffer.from(body).toString("base64"),
+          });
+        } catch (error) {
+          // If fulfilling fails, try to continue the request to avoid hanging
+          try {
+            await this.domains.Fetch.continueRequest({ requestId });
+          } catch {
+            // Request may already be handled or cancelled
+          }
+          console.error(`Failed to fulfill mock request: ${error}`);
+        }
+
+        return;
+      }
+    }
+
+    // No mock rule matched - continue with the original request
+    if (this.verbose) {
+      console.log(`[CDP:Fetch] PASS ${method} ${url.substring(0, 80)}`);
+    }
+    try {
+      await this.domains.Fetch.continueRequest({ requestId });
+    } catch (error) {
+      // Request may already be handled or cancelled
+      console.error(`Failed to continue request: ${error}`);
+    }
+  }
+
+  /**
+   * Navigates to a URL and waits for the page to load
+   * @param url - The URL to navigate to
+   * @throws If navigation times out or fails
+   */
+  async navigate(url: string): Promise<void> {
+    if (!this.connected) {
+      throw new Error("CDP client is not connected");
+    }
+
+    const { Page } = this.domains;
+    const timeout = 30000; // 30 seconds
+
+    try {
+      // Set up load event listener BEFORE navigating to avoid race conditions
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+      const timeoutPromise = new Promise<void>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error("Navigation timeout")), timeout);
+      });
+
+      const loadPromise = Promise.race([
+        new Promise<void>((resolve) => {
+          Page.loadEventFired(() => resolve());
+        }),
+        timeoutPromise,
+      ]);
+
+      // Suppress unhandled rejection on the timeout promise if loadEventFired wins
+      timeoutPromise.catch(() => {});
+
+      // Call Page.navigate
+      const result = await Page.navigate({ url });
+
+      if (result.errorText) {
+        if (timeoutId) clearTimeout(timeoutId);
+        throw new Error(`Navigation error: ${result.errorText}`);
+      }
+
+      // Wait for load event
+      try {
+        await loadPromise;
+      } finally {
+        // Always clear the timeout to prevent dangling timers
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+    } catch (error) {
+      throw new Error(`Failed to navigate to ${url}: ${error}`);
+    }
+  }
+
+  /**
+   * Evaluates JavaScript code in the page context
+   * @param expression - The JavaScript expression to evaluate
+   * @returns The result of the evaluation
+   * @throws If evaluation fails or throws an exception
+   */
+  async evaluate(expression: string): Promise<unknown> {
+    if (!this.connected) {
+      throw new Error("CDP client is not connected");
+    }
+
+    const { Runtime } = this.domains;
+
+    try {
+      const result = await Runtime.evaluate({
+        expression,
+        returnByValue: true, // Ensures objects/arrays are returned as values, not remote references
+        awaitPromise: true,  // Await promise results
+      });
+
+      // Check for exceptions
+      if (result.exceptionDetails) {
+        throw new Error(
+          `Evaluation error: ${result.exceptionDetails.text}`
+        );
+      }
+
+      // Return the value
+      if (result.result.type === "undefined") {
+        return undefined;
+      }
+
+      return result.result.value;
+    } catch (error) {
+      throw new Error(`Failed to evaluate: ${error}`);
+    }
+  }
+
+  /**
+   * Fills a form field with a value
+   * Handles text inputs, textareas, and other input types
+   * @param selector - CSS selector for the element to fill
+   * @param value - The value to fill in
+   * @throws If element is not found or fill operation fails
+   */
+  async fill(selector: string, value: string): Promise<void> {
+    if (!this.connected) {
+      throw new Error("CDP client is not connected");
+    }
+
+    const { DOM, Runtime, Input } = this.domains;
+
+    try {
+      // Get the root document
+      const { root } = await DOM.getDocument();
+
+      // Query for the element
+      const { nodeId } = await DOM.querySelector({
+        nodeId: root.nodeId,
+        selector,
+      });
+
+      if (!nodeId) {
+        throw new Error(`Element not found: ${selector}`);
+      }
+
+      // Safely escape the selector for use in JS string
+      const escapedSelector = JSON.stringify(selector);
+
+      // Focus the element
+      const focusResult = await Runtime.evaluate({
+        expression: `(function() { const el = document.querySelector(${escapedSelector}); if (!el) throw new Error('Element not found'); el.focus(); return true; })()`,
+        returnByValue: true,
+      });
+      if (focusResult.exceptionDetails) {
+        throw new Error(`Failed to focus element: ${focusResult.exceptionDetails.text}`);
+      }
+
+      // Select all text (Meta+A on macOS for Cmd, works in CDP regardless of platform)
+      await Input.dispatchKeyEvent({
+        type: "keyDown",
+        key: "a",
+        code: "KeyA",
+        modifiers: 2, // Ctrl modifier (works in CDP headless regardless of OS)
+      });
+      await Input.dispatchKeyEvent({
+        type: "keyUp",
+        key: "a",
+        code: "KeyA",
+        modifiers: 2,
+      });
+
+      // Delete selected text
+      await Input.dispatchKeyEvent({
+        type: "keyDown",
+        key: "Delete",
+        code: "Delete",
+      });
+      await Input.dispatchKeyEvent({
+        type: "keyUp",
+        key: "Delete",
+        code: "Delete",
+      });
+
+      // Type the new value character by character
+      for (const char of value) {
+        await Input.dispatchKeyEvent({
+          type: "char",
+          text: char,
+        });
+      }
+
+      // Dispatch input and change events for framework compatibility (React, Vue, etc.)
+      await Runtime.evaluate({
+        expression: `(function() {
+          const el = document.querySelector(${escapedSelector});
+          if (el) {
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        })()`,
+        returnByValue: true,
+      });
+
+      // Blur the element
+      await Runtime.evaluate({
+        expression: `(function() { const el = document.querySelector(${escapedSelector}); if (el) el.blur(); })()`,
+        returnByValue: true,
+      });
+    } catch (error) {
+      throw new Error(`Failed to fill ${selector}: ${error}`);
+    }
+  }
+
+  /**
+   * Clicks an element
+   * Finds the element, calculates the center of its bounds, and dispatches click events
+   * @param selector - CSS selector for the element to click
+   * @throws If element is not found or click operation fails
+   */
+  async click(selector: string): Promise<void> {
+    if (!this.connected) {
+      throw new Error("CDP client is not connected");
+    }
+
+    const { DOM, Input } = this.domains;
+
+    try {
+      // Get the root document
+      const { root } = await DOM.getDocument();
+
+      // Query for the element
+      const { nodeId } = await DOM.querySelector({
+        nodeId: root.nodeId,
+        selector,
+      });
+
+      if (!nodeId) {
+        throw new Error(`Element not found: ${selector}`);
+      }
+
+      // Get the element bounds
+      const box = await DOM.getBoxModel({ nodeId });
+
+      if (!box.model || !box.model.content) {
+        throw new Error(`Could not get bounds for ${selector}`);
+      }
+
+      // Calculate center coordinates
+      // content is [x1, y1, x2, y2, x3, y3, x4, y4]
+      const x1 = box.model.content[0];
+      const y1 = box.model.content[1];
+      const x2 = box.model.content[4];
+      const y2 = box.model.content[5];
+
+      const centerX = (x1 + x2) / 2;
+      const centerY = (y1 + y2) / 2;
+
+      // Single click: mousePressed then mouseReleased with clickCount
+      await Input.dispatchMouseEvent({
+        type: "mousePressed",
+        x: centerX,
+        y: centerY,
+        button: "left",
+        clickCount: 1,
+      });
+
+      await Input.dispatchMouseEvent({
+        type: "mouseReleased",
+        x: centerX,
+        y: centerY,
+        button: "left",
+        clickCount: 1,
+      });
+    } catch (error) {
+      throw new Error(`Failed to click ${selector}: ${error}`);
+    }
+  }
+
+  /**
+   * Gets all collected console messages (non-destructive — returns a copy)
+   * @returns Array of console messages with type and text
+   */
+  async getConsoleMessages(): Promise<Array<{ type: string; text: string }>> {
+    return [...this.consoleMessages];
+  }
+
+  /**
+   * Gets all collected network responses (non-destructive — returns a copy)
+   * @returns Array of network responses with URL, method, status code, and timestamp
+   */
+  async getNetworkResponses(): Promise<Array<{ url: string; method: string; status: number; timestamp: number }>> {
+    return this.networkResponses.map(({ url, method, status, timestamp }) => ({
+      url,
+      method,
+      status,
+      timestamp,
+    }));
+  }
+
+  /**
+   * Gets the DOM snapshot as an HTML string
+   * Serializes the DOM tree into a simple text representation
+   * @returns HTML string representation of the current DOM
+   * @throws If snapshot operation fails
+   */
+  async getDomSnapshot(): Promise<string> {
+    if (!this.connected) {
+      throw new Error("CDP client is not connected");
+    }
+
+    const { DOM } = this.domains;
+
+    try {
+      // Get the root document with depth to pre-populate children
+      const { root } = await DOM.getDocument({ depth: -1 });
+
+      // Serialize the DOM tree to HTML
+      const html = this.serializeDOMNode(root);
+      return html;
+    } catch (error) {
+      throw new Error(`Failed to get DOM snapshot: ${error}`);
+    }
+  }
+
+  /**
+   * Recursively serializes a DOM node to an HTML string
+   * Handles document nodes (type 9), element nodes (type 1), and text nodes (type 3)
+   * @param node - The DOM node to serialize
+   * @returns HTML string representation of the node
+   */
+  private serializeDOMNode(node: any): string {
+    // Handle text nodes
+    if (node.nodeType === 3) {
+      // TEXT_NODE
+      return node.nodeValue || "";
+    }
+
+    // Handle document nodes (type 9) — just serialize children
+    if (node.nodeType === 9 || node.nodeType === 10 || node.nodeType === 11) {
+      let html = "";
+      if (node.children && node.children.length > 0) {
+        for (const child of node.children) {
+          html += this.serializeDOMNode(child);
+        }
+      }
+      return html;
+    }
+
+    // Handle element nodes
+    if (node.nodeType === 1) {
+      // ELEMENT_NODE
+      const tagName = node.nodeName.toLowerCase();
+      let html = `<${tagName}`;
+
+      // Add attributes with proper escaping
+      if (node.attributes) {
+        for (let i = 0; i < node.attributes.length; i += 2) {
+          const attrName = node.attributes[i];
+          const attrValue = node.attributes[i + 1];
+          html += ` ${attrName}="${this.escapeAttrValue(attrValue)}"`;
+        }
+      }
+
+      html += ">";
+
+      // Self-closing tags
+      if (
+        ["area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+          "meta", "param", "source", "track", "wbr"].includes(tagName)
+      ) {
+        return html;
+      }
+
+      // Serialize child nodes (use pre-populated children from getDocument depth:-1)
+      if (node.children && node.children.length > 0) {
+        for (const child of node.children) {
+          html += this.serializeDOMNode(child);
+        }
+      }
+
+      // Close tag
+      html += `</${tagName}>`;
+      return html;
+    }
+
+    // Other node types (comments, etc.) — skip
+    return "";
+  }
+
+  /**
+   * Adds a mock rule for network interception
+   * Converts glob patterns to RegExp for matching
+   * @param pattern - Glob pattern to match URLs
+   * @param status - HTTP status code for the mock response
+   * @param body - Optional response body
+   * @param delay - Optional delay in milliseconds before responding
+   */
+  addMockRule(
+    pattern: string,
+    status: number,
+    body?: unknown,
+    delay?: number
+  ): void {
+    const regexpPattern = this.globToRegExp(pattern);
+    this.mockRules.push({
+      pattern: regexpPattern,
+      status,
+      body,
+      delay,
+    });
+  }
+
+  /**
+   * Closes the CDP client connection
+   * Disconnects from Chrome and cleans up resources
+   * @throws If disconnection fails
+   */
+  async close(): Promise<void> {
+    if (this.client) {
+      // Set connected=false BEFORE closing so in-flight event handlers
+      // (e.g., Fetch.requestPaused) see the disconnected state immediately
+      this.connected = false;
+      try {
+        await this.client.close();
+      } catch (error) {
+        throw new Error(`Failed to close CDP client: ${error}`);
+      } finally {
+        this.client = null;
+        // Clean up event tracking data
+        this.networkRequestTimes.clear();
+        this.onEvent = undefined;
+      }
+    }
+  }
+}
