@@ -1,0 +1,32 @@
+graph TD
+    subgraph "Current: No Events (Black Box)"
+        CALLER["Caller<br/>(MCP server)"] -->|"runTest(testDef)"| RUNNER["step-runner.ts"]
+        RUNNER -->|"execute steps<br/>silently..."| STEPS["Step 1 → Step 2 → ... → Step N"]
+        STEPS -->|"final TestResult"| CALLER
+    end
+
+    subgraph "Gap: No Real-Time Visibility"
+        G1["No step-start / step-end events"]
+        G2["No live console message streaming"]
+        G3["No progress tracking<br/>(step 3 of 10)"]
+        G4["No way for GUI to show<br/>real-time updates"]
+    end
+
+    subgraph "Needed For"
+        N1["Item 5: HTTP API<br/>SSE/WebSocket progress"]
+        N2["Item 6: React GUI<br/>live test dashboard"]
+        N3["Item 4: MCP tools<br/>streaming progress"]
+    end
+
+    G4 -.->|"blocks"| N1
+    G4 -.->|"blocks"| N2
+    G4 -.->|"blocks"| N3
+
+    style RUNNER fill:#ff9f43,color:#fff
+    style G1 fill:#ff6b6b,color:#fff
+    style G2 fill:#ff6b6b,color:#fff
+    style G3 fill:#ff6b6b,color:#fff
+    style G4 fill:#ff6b6b,color:#fff
+    style N1 fill:#4a9eff,color:#fff
+    style N2 fill:#4a9eff,color:#fff
+    style N3 fill:#4a9eff,color:#fff

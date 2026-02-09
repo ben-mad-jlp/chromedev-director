@@ -1,0 +1,158 @@
+graph TD
+    %% Wave 1 - Foundational Tasks (16 tasks)
+    run-test-type(["run-test-type"])
+    mcp-crud-tools(["mcp-crud-tools"])
+    mcp-result-tools(["mcp-result-tools"])
+    gui-run-button(["gui-run-button"])
+    gui-log-entry(["gui-log-entry"])
+    gui-run-store-impl(["gui-run-store-impl"])
+    event-types(["event-types"])
+    gui-utils(["gui-utils"])
+    gui-result-step-card(["gui-result-step-card"])
+    gui-step-card(["gui-step-card"])
+    gui-test-list(["gui-test-list"])
+    api-server-setup(["api-server-setup"])
+    storage-types(["storage-types"])
+    storage-init(["storage-init"])
+    gui-scaffold(["gui-scaffold"])
+    gui-types(["gui-types"])
+
+    %% Wave 2 - Dependent Tasks (16 tasks)
+    run-test-handler(["run-test-handler"])
+    mcp-run-test-extend(["mcp-run-test-extend"])
+    gui-log-panel(["gui-log-panel"])
+    event-runner(["event-runner"])
+    event-cdp(["event-cdp"])
+    gui-results-tab(["gui-results-tab"])
+    gui-history-item(["gui-history-item"])
+    gui-nested-block(["gui-nested-block"])
+    api-crud-routes(["api-crud-routes"])
+    api-chrome-status(["api-chrome-status"])
+    api-cli(["api-cli"])
+    storage-test-crud(["storage-test-crud"])
+    storage-result-crud(["storage-result-crud"])
+    storage-helpers(["storage-helpers"])
+    gui-api-client(["gui-api-client"])
+    gui-ws-client(["gui-ws-client"])
+
+    %% Wave 3 - Testing & Integration (9 tasks)
+    run-test-tests(["run-test-tests"])
+    mcp-tests(["mcp-tests"])
+    gui-wire-run-ui(["gui-wire-run-ui"])
+    event-tests(["event-tests"])
+    gui-history-tab(["gui-history-tab"])
+    gui-steps-tab(["gui-steps-tab"])
+    api-run-route(["api-run-route"])
+    storage-tests(["storage-tests"])
+    gui-stores(["gui-stores"])
+
+    %% Wave 4 - Assembly (4 tasks)
+    gui-wire-tabs(["gui-wire-tabs"])
+    gui-test-detail(["gui-test-detail"])
+    api-tests(["api-tests"])
+    gui-layout(["gui-layout"])
+
+    %% Wave 5 - Final (1 task)
+    gui-app(["gui-app"])
+
+    %% Dependencies - Wave 1 → Wave 2
+    run-test-type --> run-test-handler
+    mcp-crud-tools --> mcp-run-test-extend
+    gui-log-entry --> gui-log-panel
+    event-types --> event-runner
+    event-types --> event-cdp
+    gui-utils --> gui-results-tab
+    gui-result-step-card --> gui-results-tab
+    gui-utils --> gui-history-item
+    gui-step-card --> gui-nested-block
+    api-server-setup --> api-crud-routes
+    api-server-setup --> api-chrome-status
+    api-server-setup --> api-cli
+    storage-init --> storage-test-crud
+    storage-init --> storage-result-crud
+    storage-types --> storage-helpers
+    gui-types --> gui-api-client
+    gui-types --> gui-ws-client
+
+    %% Dependencies - Wave 2 → Wave 3
+    run-test-handler --> run-test-tests
+    mcp-crud-tools --> mcp-tests
+    mcp-result-tools --> mcp-tests
+    mcp-run-test-extend --> mcp-tests
+    gui-run-button --> gui-wire-run-ui
+    gui-log-panel --> gui-wire-run-ui
+    gui-run-store-impl --> gui-wire-run-ui
+    event-runner --> event-tests
+    event-cdp --> event-tests
+    gui-history-item --> gui-history-tab
+    gui-step-card --> gui-steps-tab
+    gui-nested-block --> gui-steps-tab
+    api-crud-routes --> api-run-route
+    storage-test-crud --> storage-tests
+    storage-result-crud --> storage-tests
+    storage-helpers --> storage-tests
+    gui-api-client --> gui-stores
+    gui-ws-client --> gui-stores
+
+    %% Dependencies - Wave 3 → Wave 4
+    gui-results-tab --> gui-wire-tabs
+    gui-history-tab --> gui-wire-tabs
+    gui-steps-tab --> gui-test-detail
+    gui-test-list --> gui-test-detail
+    api-crud-routes --> api-tests
+    api-run-route --> api-tests
+    api-chrome-status --> api-tests
+    api-cli --> api-tests
+    gui-stores --> gui-layout
+    gui-scaffold --> gui-layout
+
+    %% Dependencies - Wave 4 → Wave 5
+    gui-layout --> gui-app
+
+    %% Styles - All waiting initially
+    style run-test-type fill:#c8e6c9,stroke:#2e7d32
+    style mcp-crud-tools fill:#c8e6c9,stroke:#2e7d32
+    style mcp-result-tools fill:#c8e6c9,stroke:#2e7d32
+    style gui-run-button fill:#c8e6c9,stroke:#2e7d32
+    style gui-log-entry fill:#c8e6c9,stroke:#2e7d32
+    style gui-run-store-impl fill:#c8e6c9,stroke:#2e7d32
+    style event-types fill:#c8e6c9,stroke:#2e7d32
+    style gui-utils fill:#c8e6c9,stroke:#2e7d32
+    style gui-result-step-card fill:#c8e6c9,stroke:#2e7d32
+    style gui-step-card fill:#c8e6c9,stroke:#2e7d32
+    style gui-test-list fill:#c8e6c9,stroke:#2e7d32
+    style api-server-setup fill:#c8e6c9,stroke:#2e7d32
+    style storage-types fill:#c8e6c9,stroke:#2e7d32
+    style storage-init fill:#c8e6c9,stroke:#2e7d32
+    style gui-scaffold fill:#c8e6c9,stroke:#2e7d32
+    style gui-types fill:#c8e6c9,stroke:#2e7d32
+    style run-test-handler fill:#e0e0e0,stroke:#9e9e9e
+    style mcp-run-test-extend fill:#e0e0e0,stroke:#9e9e9e
+    style gui-log-panel fill:#e0e0e0,stroke:#9e9e9e
+    style event-runner fill:#e0e0e0,stroke:#9e9e9e
+    style event-cdp fill:#e0e0e0,stroke:#9e9e9e
+    style gui-results-tab fill:#e0e0e0,stroke:#9e9e9e
+    style gui-history-item fill:#e0e0e0,stroke:#9e9e9e
+    style gui-nested-block fill:#e0e0e0,stroke:#9e9e9e
+    style api-crud-routes fill:#e0e0e0,stroke:#9e9e9e
+    style api-chrome-status fill:#e0e0e0,stroke:#9e9e9e
+    style api-cli fill:#e0e0e0,stroke:#9e9e9e
+    style storage-test-crud fill:#e0e0e0,stroke:#9e9e9e
+    style storage-result-crud fill:#e0e0e0,stroke:#9e9e9e
+    style storage-helpers fill:#e0e0e0,stroke:#9e9e9e
+    style gui-api-client fill:#e0e0e0,stroke:#9e9e9e
+    style gui-ws-client fill:#e0e0e0,stroke:#9e9e9e
+    style run-test-tests fill:#e0e0e0,stroke:#9e9e9e
+    style mcp-tests fill:#e0e0e0,stroke:#9e9e9e
+    style gui-wire-run-ui fill:#e0e0e0,stroke:#9e9e9e
+    style event-tests fill:#e0e0e0,stroke:#9e9e9e
+    style gui-history-tab fill:#e0e0e0,stroke:#9e9e9e
+    style gui-steps-tab fill:#e0e0e0,stroke:#9e9e9e
+    style api-run-route fill:#e0e0e0,stroke:#9e9e9e
+    style storage-tests fill:#e0e0e0,stroke:#9e9e9e
+    style gui-stores fill:#e0e0e0,stroke:#9e9e9e
+    style gui-wire-tabs fill:#e0e0e0,stroke:#9e9e9e
+    style gui-test-detail fill:#e0e0e0,stroke:#9e9e9e
+    style api-tests fill:#e0e0e0,stroke:#9e9e9e
+    style gui-layout fill:#e0e0e0,stroke:#9e9e9e
+    style gui-app fill:#e0e0e0,stroke:#9e9e9e

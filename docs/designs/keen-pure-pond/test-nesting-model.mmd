@@ -1,0 +1,36 @@
+graph TD
+    subgraph PackagingTest["Packaging Station Test"]
+        direction TB
+        P1["[nested] Login Flow"]
+        P2["click: Drawer Menu"]
+        P3["click: Packaging Station"]
+        P4["wait_for: Station loaded"]
+        P5["assert: Station name visible"]
+        P1 --> P2 --> P3 --> P4 --> P5
+    end
+
+    subgraph LoginFlow["Login Flow (saved test)"]
+        direction TB
+        L1["navigate: localhost:8081"]
+        L2["fill: Division = MAIN"]
+        L3["fill: Employee = John"]
+        L4["fill: Password = ****"]
+        L5["click: Login"]
+        L6["assert: Welcome"]
+        L1 --> L2 --> L3 --> L4 --> L5 --> L6
+    end
+
+    subgraph E2ETest["Full E2E Suite"]
+        direction TB
+        E1["[nested] Packaging Station Test"]
+        E2["click: Create Box"]
+        E3["fill: Box ID = CTN-5001"]
+        E4["assert: Box created"]
+        E1 --> E2 --> E3 --> E4
+    end
+
+    P1 -.->|includes| LoginFlow
+    E1 -.->|includes| PackagingTest
+
+    style P1 fill:#e1f0ff,stroke:#4a9eff
+    style E1 fill:#e1f0ff,stroke:#4a9eff

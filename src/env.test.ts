@@ -536,4 +536,183 @@ describe("interpolateStep", () => {
       });
     });
   });
+
+  describe("high-level step interpolation", () => {
+    it("scan_input: interpolates selector and value", () => {
+      const step = interpolateStep(
+        { scan_input: { selector: "$vars.input", value: "$env.CODE" } } as any,
+        { CODE: "CTN-5001" },
+        { input: "[aria-label='Barcode']" }
+      );
+      expect(step).toEqual({
+        scan_input: { selector: "[aria-label='Barcode']", value: "CTN-5001" },
+      });
+    });
+
+    it("fill_form: interpolates each field's selector and value", () => {
+      const step = interpolateStep(
+        {
+          fill_form: {
+            fields: [
+              { selector: "$vars.emailInput", value: "$env.EMAIL" },
+              { selector: "#password", value: "$vars.pw" },
+            ],
+          },
+        } as any,
+        { EMAIL: "a@b.com" },
+        { emailInput: "[aria-label='Email']", pw: "secret" }
+      );
+      expect(step).toEqual({
+        fill_form: {
+          fields: [
+            { selector: "[aria-label='Email']", value: "a@b.com" },
+            { selector: "#password", value: "secret" },
+          ],
+        },
+      });
+    });
+
+    it("scroll_to: interpolates selector", () => {
+      const step = interpolateStep(
+        { scroll_to: { selector: "$vars.target" } } as any,
+        {},
+        { target: "#footer" }
+      );
+      expect(step).toEqual({ scroll_to: { selector: "#footer" } });
+    });
+
+    it("clear_input: interpolates selector", () => {
+      const step = interpolateStep(
+        { clear_input: { selector: "$env.FIELD" } } as any,
+        { FIELD: "[aria-label='Search']" },
+        {}
+      );
+      expect(step).toEqual({ clear_input: { selector: "[aria-label='Search']" } });
+    });
+
+    it("wait_for_text: interpolates text and selector, preserves timeout", () => {
+      const step = interpolateStep(
+        { wait_for_text: { text: "$vars.msg", selector: "$vars.scope", timeout: 3000 } } as any,
+        {},
+        { msg: "Welcome", scope: "#main" }
+      );
+      expect(step).toEqual({
+        wait_for_text: { text: "Welcome", selector: "#main", timeout: 3000 },
+      });
+    });
+
+    it("wait_for_text_gone: interpolates text and selector, preserves timeout", () => {
+      const step = interpolateStep(
+        { wait_for_text_gone: { text: "$env.LOADER", timeout: 5000 } } as any,
+        { LOADER: "Loading..." },
+        {}
+      );
+      expect(step).toEqual({
+        wait_for_text_gone: { text: "Loading...", timeout: 5000 },
+      });
+    });
+
+    it("assert_text: interpolates text and selector, preserves absent and retry", () => {
+      const step = interpolateStep(
+        {
+          assert_text: {
+            text: "$vars.expected",
+            absent: true,
+            selector: "$vars.scope",
+            retry: { interval: 200, timeout: 3000 },
+          },
+        } as any,
+        {},
+        { expected: "Error", scope: "#alerts" }
+      );
+      expect(step).toEqual({
+        assert_text: {
+          text: "Error",
+          absent: true,
+          selector: "#alerts",
+          retry: { interval: 200, timeout: 3000 },
+        },
+      });
+    });
+
+    it("click_text: interpolates text and selector, preserves match", () => {
+      const step = interpolateStep(
+        { click_text: { text: "$vars.btn", match: "exact", selector: "$vars.scope" } } as any,
+        {},
+        { btn: "Submit", scope: "#form" }
+      );
+      expect(step).toEqual({
+        click_text: { text: "Submit", match: "exact", selector: "#form" },
+      });
+    });
+
+    it("click_nth: interpolates text and selector, preserves index and match", () => {
+      const step = interpolateStep(
+        { click_nth: { index: 2, text: "$vars.label", selector: "$env.SEL", match: "contains" } } as any,
+        { SEL: "button" },
+        { label: "Edit" }
+      );
+      expect(step).toEqual({
+        click_nth: { index: 2, text: "Edit", selector: "button", match: "contains" },
+      });
+    });
+
+    it("type: interpolates selector and text, preserves delay and clear", () => {
+      const step = interpolateStep(
+        { type: { selector: "$vars.input", text: "$env.QUERY", delay: 100, clear: true } } as any,
+        { QUERY: "react hooks" },
+        { input: "#search" }
+      );
+      expect(step).toEqual({
+        type: { selector: "#search", text: "react hooks", delay: 100, clear: true },
+      });
+    });
+
+    it("choose_dropdown: interpolates selector and text, preserves timeout", () => {
+      const step = interpolateStep(
+        { choose_dropdown: { selector: "$vars.dd", text: "$env.OPT", timeout: 5000 } } as any,
+        { OPT: "Engineering" },
+        { dd: "[aria-label='Division']" }
+      );
+      expect(step).toEqual({
+        choose_dropdown: { selector: "[aria-label='Division']", text: "Engineering", timeout: 5000 },
+      });
+    });
+
+    it("expand_menu: interpolates group", () => {
+      const step = interpolateStep(
+        { expand_menu: { group: "$vars.menuName" } } as any,
+        {},
+        { menuName: "Packaging" }
+      );
+      expect(step).toEqual({ expand_menu: { group: "Packaging" } });
+    });
+
+    it("toggle: interpolates inner label, preserves state", () => {
+      const step = interpolateStep(
+        { toggle: { label: "$vars.feature", state: true } } as any,
+        {},
+        { feature: "Dark mode" }
+      );
+      expect(step).toEqual({ toggle: { label: "Dark mode", state: true } });
+    });
+
+    it("close_modal: preserves strategy (no strings to interpolate)", () => {
+      const step = interpolateStep(
+        { close_modal: { strategy: "escape" } } as any,
+        {},
+        {}
+      );
+      expect(step).toEqual({ close_modal: { strategy: "escape" } });
+    });
+
+    it("close_modal: empty object preserved", () => {
+      const step = interpolateStep(
+        { close_modal: {} } as any,
+        {},
+        {}
+      );
+      expect(step).toEqual({ close_modal: {} });
+    });
+  });
 });

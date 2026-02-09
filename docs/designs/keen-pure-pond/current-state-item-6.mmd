@@ -1,0 +1,33 @@
+graph TD
+    subgraph Existing["Existing Artifacts"]
+        Wireframe["revised-test-viewer wireframe<br/>Full layout with sidebar, steps,<br/>nested blocks, run output"]
+        UIModel["ui-interaction-model doc<br/>Role split: AI creates, user manages"]
+        StorageDoc["storage-design doc<br/>SavedTest, TestRun, Config shapes"]
+        DesignGaps["design-gaps doc<br/>API endpoints, WebSocket protocol"]
+    end
+
+    subgraph ToBuild["To Build: gui/ directory"]
+        Vite["Vite + React + TypeScript"]
+        Pages["Components"]
+        API["API client layer"]
+        WS["WebSocket hook"]
+    end
+
+    subgraph Components["Key UI Areas"]
+        Sidebar["Sidebar<br/>Test list, search, pass/fail icons"]
+        Main["Main Area<br/>Test name, Run/Suite buttons"]
+        Tabs["Tabs<br/>Steps / Results / History"]
+        Steps["Steps Tab<br/>Step cards, nested blocks, drop zone"]
+        Console["Run Output<br/>Live step progress via WS"]
+    end
+
+    Wireframe -.->|"defines layout"| Components
+    UIModel -.->|"defines interactions"| Components
+    StorageDoc -.->|"defines data shapes"| API
+    DesignGaps -.->|"defines endpoints"| API
+
+    ToBuild --> Components
+
+    style Existing fill:#e3f2fd,stroke:#1976d2
+    style ToBuild fill:#e8f5e9,stroke:#388e3c
+    style Components fill:#fff3e0,stroke:#f57c00

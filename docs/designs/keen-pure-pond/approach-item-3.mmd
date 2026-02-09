@@ -1,0 +1,36 @@
+sequenceDiagram
+    participant Caller as Caller (server.ts)
+    participant Emitter as EventEmitter
+    participant Runner as step-runner.ts
+    participant CDP as cdp-client.ts
+
+    Caller->>Runner: runTest(def, port, {emitter})
+    Runner->>Emitter: test:start {testId, url, stepCount}
+    Runner->>CDP: connect()
+
+    loop Before hooks
+        Runner->>Emitter: before:start {index}
+        Runner->>CDP: executeStep(hook)
+        Runner->>Emitter: before:end {index, success}
+    end
+
+    Runner->>CDP: navigate(url)
+
+    loop Main steps
+        Runner->>Emitter: step:start {index, label, type}
+        Runner->>CDP: executeStep(step)
+        CDP-->>Runner: console message
+        Runner->>Emitter: console {type, text}
+        CDP-->>Runner: network response
+        Runner->>Emitter: network {url, status}
+        Runner->>Emitter: step:end {index, success, duration}
+    end
+
+    loop After hooks
+        Runner->>Emitter: after:start {index}
+        Runner->>CDP: executeStep(hook)
+        Runner->>Emitter: after:end {index, success}
+    end
+
+    Runner->>Emitter: test:end {status, duration}
+    Runner-->>Caller: TestResult

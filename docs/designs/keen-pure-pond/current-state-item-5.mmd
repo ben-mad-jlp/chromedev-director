@@ -1,0 +1,35 @@
+graph TD
+    subgraph Existing["Existing (stdio only)"]
+        MCP["server.ts<br/>MCP Server (stdio)"]
+        Runner["step-runner.ts<br/>runTest()"]
+        CDP["cdp-client.ts<br/>CDP wrapper"]
+        Env["env.ts<br/>interpolation"]
+        Types["types.ts<br/>TestDef, StepDef"]
+    end
+
+    subgraph Planned["To Build: api-server.ts"]
+        HTTP["REST API<br/>CRUD + Run"]
+        WS["WebSocket<br/>Live progress"]
+        Static["Static Files<br/>React GUI"]
+        Chrome["Chrome Health<br/>/api/chrome/status"]
+        Concurrency["Run Lock<br/>409 on conflict"]
+    end
+
+    subgraph SharedNew["To Build: Shared"]
+        Storage["storage.ts<br/>.director/ read/write"]
+        Events["onEvent callback<br/>RunEvent type"]
+    end
+
+    MCP --> Runner
+    HTTP --> Runner
+    HTTP --> Storage
+    Runner --> CDP
+    Runner --> Env
+    Runner -.->|"optional"| Events
+    Events -.->|"forward"| WS
+    WS -.->|"stream"| GUI["React GUI"]
+    Static -.->|"serves"| GUI
+
+    style Planned fill:#e8f5e9,stroke:#388e3c
+    style SharedNew fill:#fff3e0,stroke:#f57c00
+    style Existing fill:#e3f2fd,stroke:#1976d2

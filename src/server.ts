@@ -51,6 +51,13 @@ interface ToolDef {
  * Zod schema for TestDef validation
  * Ensures all incoming test definitions match the expected structure
  */
+const VerifyPageSchema = z.object({
+  selector: z.string().optional(),
+  title: z.string().optional(),
+  url_contains: z.string().optional(),
+  timeout: z.number().optional(),
+}).optional();
+
 const TestDefSchema = z.object({
   url: z.string(),
   env: z.record(z.unknown()).optional(),
@@ -63,6 +70,7 @@ const TestDefSchema = z.object({
   })).optional(),
   before: z.array(z.unknown()).optional(),
   after: z.array(z.unknown()).optional(),
+  verify_page: VerifyPageSchema,
   steps: z.array(z.unknown()),
   timeout: z.number().optional(),
   resume_from: z.number().optional(),
@@ -675,9 +683,26 @@ Pass \`test\` to run a test immediately without saving:
   after?: StepDef[],    // Cleanup steps, ALWAYS run even if steps fail
   env?: Record<string, unknown>,  // $env.KEY interpolation in step strings
   timeout?: number,     // Test-level timeout in ms (default 30000)
+  verify_page?: VerifyPageDef, // Post-navigation page verification (see below)
   resume_from?: number  // Skip to step N (checks variable dependencies)
 }
 \`\`\`
+
+## Page verification
+
+Add \`verify_page\` to a TestDef to assert the page loaded correctly before steps run.
+Polls until conditions pass or timeout (default 10s).
+
+\`\`\`ts
+verify_page?: {
+  selector?: string,      // CSS selector that must exist
+  title?: string,         // Substring document.title must contain
+  url_contains?: string,  // Substring the URL must contain
+  timeout?: number        // Poll timeout in ms (default 10000)
+}
+\`\`\`
+
+Example: \`{ verify_page: { selector: "#app", title: "Dashboard", timeout: 5000 } }\`
 
 ## Runtime inputs
 
@@ -693,6 +718,8 @@ InputDef = { name: string, label: string, type: 'text' | 'number' | 'boolean', d
 - Example: \`{ "testId": "login-flow", "inputs": { "username": "admin", "password": "1234" } }\`
 
 ## Step types
+
+Every step supports these optional fields: \`label\` (string for error messages), \`if\` (JS expression — skip step when falsy), \`capture_dom\` (boolean — snapshot DOM after step passes).
 
 - **eval** — Execute JS in the page. Use \`as\` to store the result in \`$vars.NAME\`.
   \`{ eval: "document.title", as: "title" }\`
@@ -749,6 +776,89 @@ InputDef = { name: string, label: string, type: 'text' | 'number' | 'boolean', d
   \`{ http_request: { url: "$env.API/seed/reset", method: "POST" } }\`
   \`{ http_request: { url: "$env.API/data", as: "response" } }\`
 
+- **loop** — Repeat steps over an array or while a condition is true.
+  - \`over\`: JS expression returning an array to iterate (e.g., \`document.querySelectorAll('.item').length\` or \`$vars.items\`)
+  - \`while\`: JS expression, loops while truthy. Requires \`max\`.
+  - \`as\`: variable name for current item (default "item"). Access via \`$vars.item\`.
+  - \`index_as\`: variable name for current index (default "index"). Access via \`$vars.index\`.
+  - \`max\`: max iterations (required for \`while\`, optional safety cap for \`over\`).
+  - \`steps\`: array of step definitions to execute each iteration.
+  - Only one of \`over\` or \`while\` may be specified.
+  \`{ loop: { over: "$vars.items", as: "item", steps: [{ eval: "$vars.item", as: "current" }] } }\`
+  \`{ loop: { while: "document.querySelector('.loading')", max: 10, steps: [{ wait: 500 }] } }\`
+
+## High-level step types
+
+These step types are syntactic sugar built on top of the primitives above. They eliminate common IIFE boilerplate patterns.
+
+- **scan_input** — Fill an input and press Enter (barcode scanner pattern). Use when a field should be submitted immediately after filling.
+  \`{ scan_input: { selector: "[aria-label='Barcode']", value: "CTN-5001" } }\`
+  \`selector\` (string) — CSS selector for the input. \`value\` (string) — text to fill.
+
+- **fill_form** — Fill multiple form fields in one step. Fails on first error with field index context.
+  \`{ fill_form: { fields: [{ selector: "[aria-label='Email']", value: "a@b.com" }, { selector: "[aria-label='Password']", value: "123" }] } }\`
+  \`fields\` (array) — Each entry has \`selector\` and \`value\`.
+
+- **scroll_to** — Scroll an element into view. Use before interacting with off-screen elements.
+  \`{ scroll_to: { selector: "#footer" } }\`
+  \`selector\` (string) — CSS selector for the element.
+
+- **clear_input** — Clear an input with proper React event dispatching (uses native value setter).
+  \`{ clear_input: { selector: "[aria-label='Search']" } }\`
+  \`selector\` (string) — CSS selector for the input.
+
+- **wait_for_text** — Wait until text appears on the page (polls at 200ms). Use after navigation or async loads.
+  \`{ wait_for_text: { text: "Welcome", timeout: 10000 } }\`
+  \`text\` (string) — text to find. \`selector\` (string, optional) — scope. \`timeout\` (number, default 5000).
+
+- **wait_for_text_gone** — Wait until text disappears from the page (polls at 200ms). Use after dismissing toasts or loaders.
+  \`{ wait_for_text_gone: { text: "Loading..." } }\`
+  \`text\` (string) — text to wait for removal. \`selector\` (string, optional) — scope. \`timeout\` (number, default 5000).
+
+- **assert_text** — Assert page contains (or doesn't contain) specific text. Supports optional retry polling.
+  \`{ assert_text: { text: "Success" } }\`
+  \`{ assert_text: { text: "Error", absent: true } }\`
+  \`{ assert_text: { text: "Loaded", retry: { interval: 500, timeout: 5000 } } }\`
+  \`text\` (string) — text to check. \`absent\` (boolean) — assert text is NOT present. \`selector\` (string, optional) — scope. \`retry\` (optional) — poll at interval until timeout.
+
+- **click_text** — Click an element by visible text content. Searches buttons, links, and interactive elements.
+  \`{ click_text: { text: "Submit" } }\`
+  \`{ click_text: { text: "Delete", match: "exact" } }\`
+  \`text\` (string) — text to find. \`match\` ("exact" | "contains", default "contains"). \`selector\` (string, optional) — scope CSS.
+
+- **click_nth** — Click the Nth element matching a selector or text pattern. Use when multiple elements match.
+  \`{ click_nth: { index: 0, selector: ".list-item" } }\`
+  \`{ click_nth: { index: 2, text: "Edit", selector: "button" } }\`
+  \`index\` (number) — 0-based index. \`text\` (string, optional) — filter by text. \`selector\` (string, optional, default interactive elements). \`match\` ("exact" | "contains", default "contains").
+
+- **type** — Type text character by character with delays. Use for autocomplete inputs or debounced fields.
+  \`{ type: { selector: "[aria-label='Search']", text: "react hooks", delay: 100 } }\`
+  \`{ type: { selector: "#input", text: "new value", clear: true } }\`
+  \`selector\` (string). \`text\` (string). \`delay\` (number, default 50ms). \`clear\` (boolean, default false) — clear input first.
+
+- **choose_dropdown** — Open a dropdown and select an option by text. Clicks the trigger, polls for options, then clicks the match.
+  \`{ choose_dropdown: { selector: "[aria-label='Division']", text: "Engineering" } }\`
+  \`selector\` (string) — dropdown trigger CSS. \`text\` (string) — option text. \`timeout\` (number, default 3000).
+
+- **expand_menu** — Expand a collapsed navigation group by name. Matches elements with \`aria-label="GroupName, collapsed"\`.
+  \`{ expand_menu: { group: "Packaging" } }\`
+  \`group\` (string) — group name. No-ops if already expanded.
+
+- **toggle** — Toggle a checkbox or switch by its label text. Finds the label, locates the associated input, and clicks.
+  \`{ toggle: { label: "Enable notifications" } }\`
+  \`{ toggle: { label: "Dark mode", state: true } }\`
+  \`label\` (string) — label text to find. \`state\` (boolean, optional) — desired state; omit to just toggle.
+
+- **close_modal** — Close current modal/overlay. Tries close button → Escape → backdrop click.
+  \`{ close_modal: {} }\`
+  \`{ close_modal: { strategy: "escape" } }\`
+  \`strategy\` ("button" | "escape" | "backdrop", optional) — specific strategy; omit to try all.
+
+## Per-step DOM snapshots
+
+Any step can have \`capture_dom: true\` to capture a DOM snapshot after that step passes. Snapshots appear in the result as \`dom_snapshots\` (a map of step index → HTML string). Use sparingly — capturing DOM is expensive.
+\`{ click: { selector: ".btn" }, capture_dom: true }\`
+
 ## Conditional steps
 
 Any step can have an \`if\` field with a JS expression. If the expression evaluates to falsy, the step is silently skipped.
@@ -769,7 +879,9 @@ If the \`if\` expression throws, the step fails. If an eval step with \`as\` is 
 - Always add \`wait\` steps (500-2000ms) after actions that trigger async renders
 - Use \`label\` on every step for clear error messages on failure
 - For complex DOM interaction, use \`eval\` with an IIFE that traverses the DOM
-- The test result includes \`console_errors\` and \`dom_snapshot\` on failure for diagnostics
+- The test result always includes \`console_log\` and \`network_log\` (both success and failure)
+- On failure, \`console_errors\` and \`dom_snapshot\` provide failure-point diagnostics
+- Use \`capture_dom: true\` on individual steps to get per-step DOM snapshots in \`dom_snapshots\`
 - \`$vars.KEY\` interpolation is raw text replacement — string values need quoting in eval expressions`,
     inputSchema: {
       type: "object" as const,
@@ -1230,6 +1342,67 @@ Must provide either \`tag\` or \`testIds\`.
     async (request: any) => {
       const { name, arguments: args = {} } = request.params;
 
+      // Summarize a TestResult for MCP output — strips large fields (logs, DOM, screenshots)
+      // and returns a compact summary pointing to get_result for full details.
+      function summarizeResult(
+        result: TestResult,
+        extra: { testId?: string; runId?: string } = {}
+      ): string {
+        const summary: Record<string, unknown> = {
+          status: result.status,
+          duration_ms: result.duration_ms,
+        };
+
+        if (extra.testId) summary.testId = extra.testId;
+        if (extra.runId) summary.runId = extra.runId;
+
+        if (result.status === "passed") {
+          summary.steps_completed = result.steps_completed;
+        } else {
+          summary.failed_step = result.failed_step;
+          if (result.failed_label) summary.failed_label = result.failed_label;
+          summary.error = result.error;
+          summary.step_definition = result.step_definition;
+          if (result.console_errors.length > 0) {
+            summary.console_errors = result.console_errors.slice(0, 5);
+            if (result.console_errors.length > 5) {
+              summary.console_errors_truncated = `${result.console_errors.length} total, showing first 5`;
+            }
+          }
+          if (result.screenshot) summary.has_screenshot = true;
+          if (result.dom_snapshot) summary.has_dom_snapshot = true;
+        }
+
+        // Summarize logs — counts + errors only
+        const errorLogs = result.console_log.filter(m => m.type === "error");
+        summary.console_log_summary = {
+          total: result.console_log.length,
+          errors: errorLogs.length,
+          ...(errorLogs.length > 0 && {
+            recent_errors: errorLogs.slice(-3).map(m => m.text.slice(0, 200)),
+          }),
+        };
+
+        const failedRequests = result.network_log.filter(r => r.status >= 400);
+        summary.network_log_summary = {
+          total: result.network_log.length,
+          failed: failedRequests.length,
+          ...(failedRequests.length > 0 && {
+            failed_requests: failedRequests.slice(0, 5).map(r => ({
+              method: r.method,
+              url: r.url,
+              status: r.status,
+            })),
+          }),
+        };
+
+        if (extra.testId && extra.runId) {
+          summary.hint = `Use get_result with testId="${extra.testId}" and runId="${extra.runId}" for full logs, DOM snapshots, and screenshots.`;
+        }
+
+        return JSON.stringify(summary, null, 2);
+      }
+
       // Special handling for run_test (supports two modes: testId or inline test)
       if (name === "run_test") {
         try {
@@ -1276,15 +1449,7 @@ Must provide either \`tag\` or \`testIds\`.
               content: [
                 {
                   type: "text" as const,
-                  text: JSON.stringify(
-                    {
-                      ...result,
-                      runId: testRun.id,
-                      testId: testId,
-                    },
-                    null,
-                    2
-                  ),
+                  text: summarizeResult(result, { testId, runId: testRun.id }),
                 },
               ],
             };
@@ -1310,7 +1475,7 @@ Must provide either \`tag\` or \`testIds\`.
               content: [
                 {
                   type: "text" as const,
-                  text: JSON.stringify(result, null, 2),
+                  text: summarizeResult(result),
                 },
               ],
             };

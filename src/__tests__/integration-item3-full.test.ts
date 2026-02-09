@@ -20,6 +20,12 @@ describe("Integration: Full Network Mocking with Multi-Step Tests", () => {
       getConsoleMessages: vi.fn(),
       getNetworkResponses: vi.fn(),
       getDomSnapshot: vi.fn(),
+      captureScreenshot: vi.fn(),
+      select: vi.fn(),
+      pressKey: vi.fn(),
+      hover: vi.fn(),
+      switchFrame: vi.fn(),
+      handleDialog: vi.fn(),
       close: vi.fn(),
       addMockRule: vi.fn(),
     };

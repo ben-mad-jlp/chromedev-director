@@ -1,0 +1,40 @@
+flowchart TB
+    subgraph Sidebar["Sidebar"]
+        Search["Search Input\n(filters by name)"]
+        List["Test List"]
+        T1["login-flow ✓"]
+        T2["packaging-flow ✗"]
+        T3["e2e-full ⚠"]
+        Search --> List
+        List --> T1
+        List --> T2
+        List --> T3
+    end
+
+    subgraph Detail["Test Detail View"]
+        Header["Test Name + URL\nRun Button"]
+        Tabs["[Steps] [Results] [History]"]
+        
+        subgraph StepsTab["Steps Tab"]
+            S1["Step 1: navigate\nurl: /login"]
+            S2["Step 2: fill\nselector: #division"]
+            S3["Step 3: run_test\nlogin-helpers ▸"]
+            subgraph Nested["Nested: login-helpers (collapsible)"]
+                N1["Step 3.1: click\nselector: .submit"]
+                N2["Step 3.2: assert\ntext: Welcome"]
+            end
+            S3 --> Nested
+        end
+        
+        Header --> Tabs
+        Tabs --> StepsTab
+    end
+
+    T1 -->|"select"| Detail
+    T2 -->|"select"| Detail
+    T3 -->|"select"| Detail
+
+    style Sidebar fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
+    style Detail fill:#1e293b,stroke:#10b981,color:#e2e8f0
+    style StepsTab fill:#0f172a,stroke:#64748b,color:#e2e8f0
+    style Nested fill:#0f172a,stroke:#f59e0b,color:#e2e8f0

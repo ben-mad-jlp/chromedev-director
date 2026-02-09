@@ -20,6 +20,12 @@ describe("Network Mocking Integration Tests (Item 3)", () => {
       getConsoleMessages: vi.fn(),
       getNetworkResponses: vi.fn(),
       getDomSnapshot: vi.fn(),
+      captureScreenshot: vi.fn(),
+      select: vi.fn(),
+      pressKey: vi.fn(),
+      hover: vi.fn(),
+      switchFrame: vi.fn(),
+      handleDialog: vi.fn(),
       close: vi.fn(),
       addMockRule: vi.fn(),
     };

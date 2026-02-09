@@ -1,0 +1,51 @@
+flowchart TB
+    subgraph GUI["gui/ (Vite + React)"]
+        direction TB
+        Main["main.tsx\n(entry point)"]
+        App["App.tsx\n(Router + Layout)"]
+        
+        subgraph Layout["Base Layout"]
+            AppBar["AppBar\n(Chrome status, title)"]
+            Sidebar["Sidebar\n(placeholder)"]
+            Content["Main Content\n(router outlet)"]
+        end
+        
+        subgraph Stores["Zustand Stores"]
+            TestStore["testStore\n(tests list, selected)"]
+            RunStore["runStore\n(active run, events)"]
+            UIStore["uiStore\n(sidebar, chrome status)"]
+        end
+        
+        subgraph Lib["lib/"]
+            API["api.ts\n(fetch wrapper)"]
+            WS["ws.ts\n(WebSocket client)"]
+            Types["types.ts\n(mirrored types)"]
+        end
+        
+        subgraph Features["features/"]
+            Tests["tests/\n(list, detail, steps)"]
+            Runs["runs/\n(progress, log panel)"]
+            History["history/\n(results, history)"]
+        end
+    end
+    
+    subgraph Server["API Server (port 3838)"]
+        REST["REST API\n(/api/tests, /api/results)"]
+        WSS["WebSocket\n(/ws)"]
+        Static["Static Files\n(gui/dist/)"]
+    end
+    
+    Main --> App
+    App --> Layout
+    App --> Features
+    Features --> Stores
+    API -->|"HTTP fetch"| REST
+    WS -->|"WebSocket"| WSS
+    Static -->|"serves"| GUI
+    
+    style GUI fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
+    style Server fill:#1e293b,stroke:#10b981,color:#e2e8f0
+    style Layout fill:#0f172a,stroke:#64748b,color:#e2e8f0
+    style Stores fill:#0f172a,stroke:#64748b,color:#e2e8f0
+    style Lib fill:#0f172a,stroke:#64748b,color:#e2e8f0
+    style Features fill:#0f172a,stroke:#64748b,color:#e2e8f0

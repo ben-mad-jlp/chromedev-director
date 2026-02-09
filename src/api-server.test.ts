@@ -234,6 +234,8 @@ describe('API Server CRUD Routes', () => {
         status: 'passed',
         steps_completed: 1,
         duration_ms: 100,
+        console_log: [],
+        network_log: [],
       });
 
       await storage.saveRun(storageDir, testId, {
@@ -243,6 +245,8 @@ describe('API Server CRUD Routes', () => {
         error: 'Assertion failed',
         console_errors: [],
         duration_ms: 50,
+        console_log: [],
+        network_log: [],
       });
     });
 
@@ -568,12 +572,16 @@ describe('API Server CRUD Routes', () => {
         status: 'passed',
         steps_completed: 1,
         duration_ms: 100,
+        console_log: [],
+        network_log: [],
       });
 
       await storage.saveRun(storageDir, testId, {
         status: 'passed',
         steps_completed: 1,
         duration_ms: 120,
+        console_log: [],
+        network_log: [],
       });
 
       await storage.saveRun(storageDir, testId, {
@@ -583,6 +591,8 @@ describe('API Server CRUD Routes', () => {
         error: 'Failed assertion',
         console_errors: [],
         duration_ms: 50,
+        console_log: [],
+        network_log: [],
       });
     });
 
@@ -812,6 +822,8 @@ describe('API Server CRUD Routes', () => {
           status: 'passed',
           steps_completed: 1,
           duration_ms: 100 + i * 10,
+          console_log: [],
+          network_log: [],
         });
         runIds.push(result.id);
       }
@@ -892,6 +904,8 @@ describe('API Server CRUD Routes', () => {
         status: 'passed',
         steps_completed: 1,
         duration_ms: 100,
+        console_log: [],
+        network_log: [],
       });
     });
 
@@ -1214,6 +1228,8 @@ describe('API Server CRUD Routes', () => {
             status: 'passed',
             steps_completed: 1,
             duration_ms: 100,
+            console_log: [],
+            network_log: [],
           });
         } else {
           await storage.saveRun(storageDir, testId, {
@@ -1223,6 +1239,8 @@ describe('API Server CRUD Routes', () => {
             error: 'Error',
             console_errors: [],
             duration_ms: 50,
+            console_log: [],
+            network_log: [],
           });
         }
       }

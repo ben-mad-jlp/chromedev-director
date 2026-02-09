@@ -1,15 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
-import { AlertCircle, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { AlertCircle, Loader2, Trash2 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { RunButton, type RunButtonState } from '@/features/runs/RunButton';
 import LogPanel from '@/features/runs/LogPanel';
 import RunInputsDialog from '@/components/RunInputsDialog';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import StepsTab from './StepsTab';
 import ResultsTab from '@/features/history/ResultsTab';
 import type { SavedTest } from '@/lib/types';
 import * as api from '@/lib/api';
 import { useRunStore } from '@/stores/run-store';
+import { useTestStore } from '@/stores/test-store';
 import { getChromeStatus } from '@/lib/api';
 
 type TabId = 'steps' | 'results';
@@ -39,6 +41,7 @@ export interface TestDetailProps {
 export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => {
   // Route params
   const { testId } = useParams<{ testId: string }>();
+  const navigate = useNavigate();
 
   // Local state for fetching test
   const [test, setTest] = useState<SavedTest | null>(initialTest ?? null);
@@ -58,11 +61,30 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
     clearLastCompleted: state.clearLastCompleted,
   }));
 
+  // Test store actions
+  const { updateTestRemote, deleteTestRemote } = useTestStore((state) => ({
+    updateTestRemote: state.updateTestRemote,
+    deleteTestRemote: state.deleteTestRemote,
+  }));
+
   // Chrome status for RunButton state
   const [chromeConnected, setChromeConnected] = useState(true);
 
   // Inputs dialog state
   const [showInputsDialog, setShowInputsDialog] = useState(false);
+
+  // Delete confirmation dialog state
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
+  // Inline editing state for name
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState('');
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  // Inline editing state for description
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [descriptionValue, setDescriptionValue] = useState('');
+  const descriptionInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch test on mount or when testId changes
   useEffect(() => {
@@ -174,6 +196,98 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
     executeRun(values);
   };
 
+  // --- Inline editing: Name ---
+  const startEditingName = () => {
+    if (!test) return;
+    setNameValue(test.name);
+    setEditingName(true);
+    // Focus happens via useEffect below
+  };
+
+  useEffect(() => {
+    if (editingName && nameInputRef.current) {
+      nameInputRef.current.focus();
+      nameInputRef.current.select();
+    }
+  }, [editingName]);
+
+  const saveName = async () => {
+    if (!test || !testId) return;
+    const trimmed = nameValue.trim();
+    if (!trimmed || trimmed === test.name) {
+      setEditingName(false);
+      return;
+    }
+    try {
+      const updated = await updateTestRemote(testId, { name: trimmed });
+      setTest(updated);
+    } catch {
+      // Revert on error — store already set the error
+    }
+    setEditingName(false);
+  };
+
+  const handleNameKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveName();
+    } else if (e.key === 'Escape') {
+      setEditingName(false);
+    }
+  };
+
+  // --- Inline editing: Description ---
+  const startEditingDescription = () => {
+    if (!test) return;
+    setDescriptionValue(test.description ?? '');
+    setEditingDescription(true);
+  };
+
+  useEffect(() => {
+    if (editingDescription && descriptionInputRef.current) {
+      descriptionInputRef.current.focus();
+      descriptionInputRef.current.select();
+    }
+  }, [editingDescription]);
+
+  const saveDescription = async () => {
+    if (!test || !testId) return;
+    const trimmed = descriptionValue.trim();
+    if (trimmed === (test.description ?? '')) {
+      setEditingDescription(false);
+      return;
+    }
+    try {
+      const updates = trimmed ? { description: trimmed } : { description: '' };
+      const updated = await updateTestRemote(testId, updates);
+      setTest(updated);
+    } catch {
+      // Revert on error
+    }
+    setEditingDescription(false);
+  };
+
+  const handleDescriptionKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveDescription();
+    } else if (e.key === 'Escape') {
+      setEditingDescription(false);
+    }
+  };
+
+  // --- Delete ---
+  const handleDelete = async () => {
+    if (!testId) return;
+    try {
+      await deleteTestRemote(testId);
+      navigate('/');
+    } catch {
+      // Store already set the error
+    }
+    setShowDeleteDialog(false);
+  };
+
   // Loading state
   if (isLoading) {
     return (
@@ -209,17 +323,65 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
       <div className="border-b border-gray-200 bg-white px-6 py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-grow min-w-0">
-            <h1 className="text-2xl font-bold text-gray-900">{test.name}</h1>
-            {test.description && (
-              <p className="text-sm text-gray-600 mt-1">{test.description}</p>
+            {/* Editable name */}
+            {editingName ? (
+              <input
+                ref={nameInputRef}
+                type="text"
+                value={nameValue}
+                onChange={(e) => setNameValue(e.target.value)}
+                onBlur={saveName}
+                onKeyDown={handleNameKeyDown}
+                className="text-2xl font-bold text-gray-900 bg-transparent border-b-2 border-blue-500 outline-none w-full"
+              />
+            ) : (
+              <h1
+                className="text-2xl font-bold text-gray-900 cursor-pointer hover:text-blue-700 transition-colors"
+                onClick={startEditingName}
+                title="Click to rename"
+              >
+                {test.name}
+              </h1>
             )}
+
+            {/* Editable description */}
+            {editingDescription ? (
+              <input
+                ref={descriptionInputRef}
+                type="text"
+                value={descriptionValue}
+                onChange={(e) => setDescriptionValue(e.target.value)}
+                onBlur={saveDescription}
+                onKeyDown={handleDescriptionKeyDown}
+                placeholder="Add description..."
+                className="text-sm text-gray-600 mt-1 bg-transparent border-b-2 border-blue-500 outline-none w-full"
+              />
+            ) : (
+              <p
+                className="text-sm mt-1 cursor-pointer hover:text-blue-700 transition-colors"
+                onClick={startEditingDescription}
+                title="Click to edit description"
+              >
+                <span className={test.description ? 'text-gray-600' : 'text-gray-400 italic'}>
+                  {test.description || 'Add description...'}
+                </span>
+              </p>
+            )}
+
             <p className="text-sm text-gray-500 mt-2">
               <span className="font-mono">{test.definition.url}</span>
             </p>
           </div>
 
-          {/* Run button */}
-          <div className="flex-shrink-0">
+          {/* Delete + Run buttons */}
+          <div className="flex-shrink-0 flex items-center gap-2">
+            <button
+              onClick={() => setShowDeleteDialog(true)}
+              className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+              title="Delete test"
+            >
+              <Trash2 className="w-5 h-5" />
+            </button>
             <RunButton
               state={getRunButtonState()}
               onClick={handleRunTest}
@@ -276,6 +438,17 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
           onClose={() => setShowInputsDialog(false)}
         />
       )}
+
+      {/* Delete confirmation dialog */}
+      <ConfirmDialog
+        open={showDeleteDialog}
+        title="Delete Test"
+        message={`Delete "${test.name}"? This will remove the test and all its run history.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={handleDelete}
+        onClose={() => setShowDeleteDialog(false)}
+      />
     </div>
   );
 };

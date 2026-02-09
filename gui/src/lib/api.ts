@@ -111,6 +111,23 @@ export async function saveTest(test: SavedTest): Promise<void> {
 }
 
 /**
+ * Update a test's metadata (name, description, tags) without sending the full test object
+ * @param id - Test ID
+ * @param updates - Partial fields to update
+ * @returns Updated SavedTest object
+ */
+export async function updateTest(
+  id: string,
+  updates: { name?: string; description?: string; tags?: string[] }
+): Promise<SavedTest> {
+  const data = await apiFetch<{ test: SavedTest }>(
+    `/tests/${encodeURIComponent(id)}`,
+    { method: "PUT", body: updates }
+  );
+  return data.test;
+}
+
+/**
  * Delete a test by ID
  * @param id - Test ID
  */

@@ -293,7 +293,7 @@ describe('MCP Server Tools - Storage Layer', () => {
 
     it('should return all results for a test', async () => {
       const testId = 'test-with-results';
-      const passResult: TestResult = { status: 'passed', steps_completed: 2, duration_ms: 1000 };
+      const passResult: TestResult = { status: 'passed', steps_completed: 2, duration_ms: 1000, console_log: [], network_log: [] };
       const failResult: TestResult = {
         status: 'failed',
         failed_step: 1,
@@ -301,6 +301,8 @@ describe('MCP Server Tools - Storage Layer', () => {
         error: 'Test failed',
         console_errors: [],
         duration_ms: 500,
+        console_log: [],
+        network_log: [],
       };
 
       // Save results
@@ -316,7 +318,7 @@ describe('MCP Server Tools - Storage Layer', () => {
 
     it('should support filtering by status', async () => {
       const testId = 'status-filter-test';
-      const passResult: TestResult = { status: 'passed', steps_completed: 1, duration_ms: 1000 };
+      const passResult: TestResult = { status: 'passed', steps_completed: 1, duration_ms: 1000, console_log: [], network_log: [] };
       const failResult: TestResult = {
         status: 'failed',
         failed_step: 0,
@@ -324,6 +326,8 @@ describe('MCP Server Tools - Storage Layer', () => {
         error: 'Failed',
         console_errors: [],
         duration_ms: 500,
+        console_log: [],
+        network_log: [],
       };
 
       await storageModule.saveResult(storageDir, testId, passResult);
@@ -340,7 +344,7 @@ describe('MCP Server Tools - Storage Layer', () => {
 
     it('should support limiting result count', async () => {
       const testId = 'limit-test';
-      const passResult: TestResult = { status: 'passed', steps_completed: 1, duration_ms: 1000 };
+      const passResult: TestResult = { status: 'passed', steps_completed: 1, duration_ms: 1000, console_log: [], network_log: [] };
 
       // Save 3 results
       await storageModule.saveResult(storageDir, testId, passResult);
@@ -354,7 +358,7 @@ describe('MCP Server Tools - Storage Layer', () => {
 
     it('should sort results by most recent first', async () => {
       const testId = 'sort-test';
-      const result: TestResult = { status: 'passed', steps_completed: 1, duration_ms: 1000 };
+      const result: TestResult = { status: 'passed', steps_completed: 1, duration_ms: 1000, console_log: [], network_log: [] };
 
       await storageModule.saveResult(storageDir, testId, result);
       await new Promise(resolve => setTimeout(resolve, 10));
@@ -371,7 +375,7 @@ describe('MCP Server Tools - Storage Layer', () => {
   describe('get_result - Result Retrieval', () => {
     it('should retrieve a specific run result', async () => {
       const testId = 'specific-result-test';
-      const passResult: TestResult = { status: 'passed', steps_completed: 3, duration_ms: 2000 };
+      const passResult: TestResult = { status: 'passed', steps_completed: 3, duration_ms: 2000, console_log: [], network_log: [] };
 
       const saved = await storageModule.saveResult(storageDir, testId, passResult);
       const retrieved = await storageModule.getResult(storageDir, testId, saved.id);
@@ -400,6 +404,8 @@ describe('MCP Server Tools - Storage Layer', () => {
         console_errors: ['TypeError: Cannot read property X'],
         dom_snapshot: '<html><body>Error</body></html>',
         duration_ms: 1500,
+        console_log: [],
+        network_log: [],
       };
 
       const saved = await storageModule.saveResult(storageDir, testId, failResult);
@@ -500,7 +506,7 @@ describe('MCP Server Tools - Storage Layer', () => {
 
     it('should enforce result retention limits', async () => {
       const testId = 'retention-test';
-      const result: TestResult = { status: 'passed', steps_completed: 1, duration_ms: 1000 };
+      const result: TestResult = { status: 'passed', steps_completed: 1, duration_ms: 1000, console_log: [], network_log: [] };
       const limit = 3;
 
       // Save 5 results with retention limit of 3
@@ -762,7 +768,7 @@ describe('MCP Server Tools - Storage Layer', () => {
       expect(retrieved!.description).toBe(description);
 
       // 4. Save run results
-      const passResult: TestResult = { status: 'passed', steps_completed: 2, duration_ms: 1000 };
+      const passResult: TestResult = { status: 'passed', steps_completed: 2, duration_ms: 1000, console_log: [], network_log: [] };
       const runResult = await storageModule.saveResult(storageDir, testId, passResult);
       expect(runResult.id).toBeDefined();
 

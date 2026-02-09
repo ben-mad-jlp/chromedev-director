@@ -1,0 +1,24 @@
+graph TD
+    subgraph "Parent Test Execution"
+        P1["Step 1: fill login form"] --> P2["Step 2: click submit"]
+        P2 --> P3["Step 3: run_test<br/>{id: 'verify-dashboard'}"]
+        P3 --> P4["Step 4: assert checkout ready"]
+    end
+
+    subgraph "run_test Step Handler"
+        P3 -->|"1. Resolve TestDef<br/>(by ID or inline)"| RESOLVE["Storage.getTest(id)<br/>or use inline def"]
+        RESOLVE -->|"2. Check depth &lt; 3"| DEPTH["Depth check"]
+        DEPTH -->|"3. Navigate to sub-test URL"| NAV["client.navigate(subDef.url)"]
+        NAV -->|"4. Run sub-test steps<br/>with parent vars"| RUN["runSteps(client, subDef)<br/>vars = parent vars"]
+        RUN -->|"5. Merge new vars back"| MERGE["Parent vars updated<br/>with sub-test vars"]
+        MERGE -->|"6. Return result"| P4
+    end
+
+    subgraph "On Sub-test Failure"
+        RUN -->|"failure"| FAIL["Return {success: false}<br/>error includes sub-test details"]
+        FAIL -->|"parent fails at step 3"| PARENT_FAIL["Parent test fails"]
+    end
+
+    style P3 fill:#4a9eff,color:#fff
+    style RUN fill:#ff9f43,color:#fff
+    style FAIL fill:#ff6b6b,color:#fff

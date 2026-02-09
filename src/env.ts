@@ -288,6 +288,196 @@ export function interpolateStep(
     };
   }
 
+  // loop step — interpolate over/while strings only, NOT nested steps
+  // Nested steps are interpolated per-iteration at execution time
+  if ("loop" in step) {
+    return {
+      ...common,
+      loop: {
+        ...(step.loop.over != null ? { over: interpolate(step.loop.over, env, vars) } : {}),
+        ...(step.loop.while != null ? { while: interpolate(step.loop.while, env, vars) } : {}),
+        ...(step.loop.as != null ? { as: step.loop.as } : {}),
+        ...(step.loop.index_as != null ? { index_as: step.loop.index_as } : {}),
+        ...(step.loop.max != null ? { max: step.loop.max } : {}),
+        steps: step.loop.steps,
+      },
+    };
+  }
+
+  // scan_input step
+  if ("scan_input" in step) {
+    return {
+      ...common,
+      scan_input: {
+        selector: interpolate(step.scan_input.selector, env, vars),
+        value: interpolate(step.scan_input.value, env, vars),
+      },
+    };
+  }
+
+  // fill_form step
+  if ("fill_form" in step) {
+    return {
+      ...common,
+      fill_form: {
+        fields: step.fill_form.fields.map(f => ({
+          selector: interpolate(f.selector, env, vars),
+          value: interpolate(f.value, env, vars),
+        })),
+      },
+    };
+  }
+
+  // scroll_to step
+  if ("scroll_to" in step) {
+    return {
+      ...common,
+      scroll_to: {
+        selector: interpolate(step.scroll_to.selector, env, vars),
+      },
+    };
+  }
+
+  // clear_input step
+  if ("clear_input" in step) {
+    return {
+      ...common,
+      clear_input: {
+        selector: interpolate(step.clear_input.selector, env, vars),
+      },
+    };
+  }
+
+  // wait_for_text step
+  if ("wait_for_text" in step) {
+    return {
+      ...common,
+      wait_for_text: {
+        text: interpolate(step.wait_for_text.text, env, vars),
+        ...(step.wait_for_text.selector != null
+          ? { selector: interpolate(step.wait_for_text.selector, env, vars) }
+          : {}),
+        ...(step.wait_for_text.timeout != null ? { timeout: step.wait_for_text.timeout } : {}),
+      },
+    };
+  }
+
+  // wait_for_text_gone step
+  if ("wait_for_text_gone" in step) {
+    return {
+      ...common,
+      wait_for_text_gone: {
+        text: interpolate(step.wait_for_text_gone.text, env, vars),
+        ...(step.wait_for_text_gone.selector != null
+          ? { selector: interpolate(step.wait_for_text_gone.selector, env, vars) }
+          : {}),
+        ...(step.wait_for_text_gone.timeout != null ? { timeout: step.wait_for_text_gone.timeout } : {}),
+      },
+    };
+  }
+
+  // assert_text step
+  if ("assert_text" in step) {
+    return {
+      ...common,
+      assert_text: {
+        text: interpolate(step.assert_text.text, env, vars),
+        ...(step.assert_text.absent != null ? { absent: step.assert_text.absent } : {}),
+        ...(step.assert_text.selector != null
+          ? { selector: interpolate(step.assert_text.selector, env, vars) }
+          : {}),
+        ...(step.assert_text.retry != null ? { retry: step.assert_text.retry } : {}),
+      },
+    };
+  }
+
+  // click_text step
+  if ("click_text" in step) {
+    return {
+      ...common,
+      click_text: {
+        text: interpolate(step.click_text.text, env, vars),
+        ...(step.click_text.match != null ? { match: step.click_text.match } : {}),
+        ...(step.click_text.selector != null
+          ? { selector: interpolate(step.click_text.selector, env, vars) }
+          : {}),
+      },
+    };
+  }
+
+  // click_nth step
+  if ("click_nth" in step) {
+    return {
+      ...common,
+      click_nth: {
+        index: step.click_nth.index,
+        ...(step.click_nth.text != null
+          ? { text: interpolate(step.click_nth.text, env, vars) }
+          : {}),
+        ...(step.click_nth.selector != null
+          ? { selector: interpolate(step.click_nth.selector, env, vars) }
+          : {}),
+        ...(step.click_nth.match != null ? { match: step.click_nth.match } : {}),
+      },
+    };
+  }
+
+  // type step
+  if ("type" in step) {
+    return {
+      ...common,
+      type: {
+        selector: interpolate(step.type.selector, env, vars),
+        text: interpolate(step.type.text, env, vars),
+        ...(step.type.delay != null ? { delay: step.type.delay } : {}),
+        ...(step.type.clear != null ? { clear: step.type.clear } : {}),
+      },
+    };
+  }
+
+  // choose_dropdown step
+  if ("choose_dropdown" in step) {
+    return {
+      ...common,
+      choose_dropdown: {
+        selector: interpolate(step.choose_dropdown.selector, env, vars),
+        text: interpolate(step.choose_dropdown.text, env, vars),
+        ...(step.choose_dropdown.timeout != null ? { timeout: step.choose_dropdown.timeout } : {}),
+      },
+    };
+  }
+
+  // expand_menu step
+  if ("expand_menu" in step) {
+    return {
+      ...common,
+      expand_menu: {
+        group: interpolate(step.expand_menu.group, env, vars),
+      },
+    };
+  }
+
+  // toggle step
+  if ("toggle" in step) {
+    return {
+      ...common,
+      toggle: {
+        label: interpolate(step.toggle.label, env, vars),
+        ...(step.toggle.state != null ? { state: step.toggle.state } : {}),
+      },
+    };
+  }
+
+  // close_modal step
+  if ("close_modal" in step) {
+    return {
+      ...common,
+      close_modal: {
+        ...(step.close_modal.strategy != null ? { strategy: step.close_modal.strategy } : {}),
+      },
+    };
+  }
+
   // Fallback: return the step as-is (shouldn't reach here with valid StepDef)
   return step;
 }

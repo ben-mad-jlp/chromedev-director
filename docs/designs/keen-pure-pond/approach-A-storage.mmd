@@ -1,0 +1,30 @@
+graph TD
+    subgraph "Approach A: Class-based Storage with Lazy I/O"
+        SERVER["server.ts<br/>MCP tools"] -->|"testId + TestDef"| STORAGE["Storage class<br/>src/storage.ts"]
+        RUNNER["step-runner.ts<br/>runTest()"] -->|"testId + TestResult"| STORAGE
+
+        STORAGE -->|"saveTest()"| FS_TESTS["tests/{slug}/def.json"]
+        STORAGE -->|"saveRun()"| FS_RUNS["tests/{slug}/runs/{ts}.json"]
+        STORAGE -->|"saveSuite()"| FS_SUITES["suites/{slug}.json"]
+
+        STORAGE -->|"getTest()"| FS_TESTS
+        STORAGE -->|"listTests()"| FS_TESTS
+        STORAGE -->|"getRuns()"| FS_RUNS
+        STORAGE -->|"getSuite()"| FS_SUITES
+    end
+
+    subgraph "Disk Layout"
+        ROOT[".chromedev-director/"]
+        ROOT --> T["tests/"]
+        T --> T1["login-flow/"]
+        T1 --> DEF1["def.json"]
+        T1 --> R1["runs/"]
+        R1 --> RUN1["2026-02-07T18-30-00.json"]
+        R1 --> RUN2["2026-02-07T19-15-00.json"]
+        ROOT --> S["suites/"]
+        S --> S1["smoke-tests.json"]
+    end
+
+    style STORAGE fill:#4a9eff,color:#fff
+    style RUNNER fill:#ff9f43,color:#fff
+    style SERVER fill:#78e08f,color:#333

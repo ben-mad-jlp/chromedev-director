@@ -1,0 +1,523 @@
+{
+  "viewport": "desktop",
+  "direction": "LR",
+  "screens": [
+    {
+      "id": "main",
+      "type": "screen",
+      "name": "Test Dashboard",
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 1200,
+        "height": 800
+      },
+      "children": [
+        {
+          "id": "appbar",
+          "type": "appbar",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1200,
+            "height": 56
+          },
+          "title": "chromedev-director",
+          "children": [
+            {
+              "id": "project-name",
+              "type": "text",
+              "bounds": {
+                "x": 60,
+                "y": 16,
+                "width": 200,
+                "height": 24
+              },
+              "content": "chromedev-director"
+            },
+            {
+              "id": "chrome-status",
+              "type": "button",
+              "bounds": {
+                "x": 950,
+                "y": 12,
+                "width": 120,
+                "height": 32
+              },
+              "label": "Chrome: Connected"
+            },
+            {
+              "id": "settings-btn",
+              "type": "icon",
+              "bounds": {
+                "x": 1150,
+                "y": 12,
+                "width": 32,
+                "height": 32
+              }
+            }
+          ]
+        },
+        {
+          "id": "sidebar",
+          "type": "col",
+          "bounds": {
+            "x": 0,
+            "y": 56,
+            "width": 280,
+            "height": 744
+          },
+          "children": [
+            {
+              "id": "search-input",
+              "type": "input",
+              "bounds": {
+                "x": 12,
+                "y": 68,
+                "width": 256,
+                "height": 40
+              },
+              "placeholder": "Search tests..."
+            },
+            {
+              "id": "new-test-btn",
+              "type": "button",
+              "bounds": {
+                "x": 12,
+                "y": 120,
+                "width": 256,
+                "height": 40
+              },
+              "label": "+ New Test"
+            },
+            {
+              "id": "test-list",
+              "type": "list",
+              "bounds": {
+                "x": 0,
+                "y": 172,
+                "width": 280,
+                "height": 628
+              },
+              "items": [
+                {
+                  "label": "Login Flow",
+                  "icon": "check-circle",
+                  "active": true
+                },
+                {
+                  "label": "Packaging Station",
+                  "icon": "check-circle"
+                },
+                {
+                  "label": "Navigation Menu",
+                  "icon": "x-circle"
+                },
+                {
+                  "label": "Form Validation",
+                  "icon": "clock"
+                },
+                {
+                  "label": "API Mock Test",
+                  "icon": "check-circle"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "main-content",
+          "type": "col",
+          "bounds": {
+            "x": 280,
+            "y": 56,
+            "width": 920,
+            "height": 744
+          },
+          "children": [
+            {
+              "id": "test-header",
+              "type": "row",
+              "bounds": {
+                "x": 280,
+                "y": 56,
+                "width": 920,
+                "height": 60
+              },
+              "children": [
+                {
+                  "id": "test-title",
+                  "type": "title",
+                  "bounds": {
+                    "x": 300,
+                    "y": 68,
+                    "width": 400,
+                    "height": 36
+                  },
+                  "content": "Login Flow"
+                },
+                {
+                  "id": "run-btn",
+                  "type": "button",
+                  "bounds": {
+                    "x": 900,
+                    "y": 68,
+                    "width": 120,
+                    "height": 40
+                  },
+                  "label": "Run Test"
+                },
+                {
+                  "id": "save-btn",
+                  "type": "button",
+                  "bounds": {
+                    "x": 1040,
+                    "y": 68,
+                    "width": 120,
+                    "height": 40
+                  },
+                  "label": "Save"
+                }
+              ]
+            },
+            {
+              "id": "tabs",
+              "type": "bottomnav",
+              "bounds": {
+                "x": 280,
+                "y": 116,
+                "width": 920,
+                "height": 44
+              },
+              "items": [
+                {
+                  "label": "Steps",
+                  "active": true
+                },
+                {
+                  "label": "Results"
+                },
+                {
+                  "label": "History"
+                },
+                {
+                  "label": "Settings"
+                }
+              ]
+            },
+            {
+              "id": "steps-panel",
+              "type": "col",
+              "bounds": {
+                "x": 280,
+                "y": 160,
+                "width": 920,
+                "height": 480
+              },
+              "children": [
+                {
+                  "id": "step-1",
+                  "type": "card",
+                  "bounds": {
+                    "x": 300,
+                    "y": 172,
+                    "width": 880,
+                    "height": 72
+                  },
+                  "children": [
+                    {
+                      "id": "s1-num",
+                      "type": "text",
+                      "bounds": {
+                        "x": 312,
+                        "y": 184,
+                        "width": 30,
+                        "height": 24
+                      },
+                      "content": "1."
+                    },
+                    {
+                      "id": "s1-type",
+                      "type": "button",
+                      "bounds": {
+                        "x": 348,
+                        "y": 184,
+                        "width": 90,
+                        "height": 28
+                      },
+                      "label": "navigate"
+                    },
+                    {
+                      "id": "s1-detail",
+                      "type": "text",
+                      "bounds": {
+                        "x": 450,
+                        "y": 184,
+                        "width": 500,
+                        "height": 24
+                      },
+                      "content": "http://localhost:8081"
+                    },
+                    {
+                      "id": "s1-status",
+                      "type": "icon",
+                      "bounds": {
+                        "x": 1140,
+                        "y": 184,
+                        "width": 24,
+                        "height": 24
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "step-2",
+                  "type": "card",
+                  "bounds": {
+                    "x": 300,
+                    "y": 256,
+                    "width": 880,
+                    "height": 72
+                  },
+                  "children": [
+                    {
+                      "id": "s2-num",
+                      "type": "text",
+                      "bounds": {
+                        "x": 312,
+                        "y": 268,
+                        "width": 30,
+                        "height": 24
+                      },
+                      "content": "2."
+                    },
+                    {
+                      "id": "s2-type",
+                      "type": "button",
+                      "bounds": {
+                        "x": 348,
+                        "y": 268,
+                        "width": 90,
+                        "height": 28
+                      },
+                      "label": "fill"
+                    },
+                    {
+                      "id": "s2-detail",
+                      "type": "text",
+                      "bounds": {
+                        "x": 450,
+                        "y": 268,
+                        "width": 500,
+                        "height": 24
+                      },
+                      "content": "selector: [aria-label='Division'] value: 'MAIN'"
+                    },
+                    {
+                      "id": "s2-status",
+                      "type": "icon",
+                      "bounds": {
+                        "x": 1140,
+                        "y": 268,
+                        "width": 24,
+                        "height": 24
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "step-3",
+                  "type": "card",
+                  "bounds": {
+                    "x": 300,
+                    "y": 340,
+                    "width": 880,
+                    "height": 72
+                  },
+                  "children": [
+                    {
+                      "id": "s3-num",
+                      "type": "text",
+                      "bounds": {
+                        "x": 312,
+                        "y": 352,
+                        "width": 30,
+                        "height": 24
+                      },
+                      "content": "3."
+                    },
+                    {
+                      "id": "s3-type",
+                      "type": "button",
+                      "bounds": {
+                        "x": 348,
+                        "y": 352,
+                        "width": 90,
+                        "height": 28
+                      },
+                      "label": "click"
+                    },
+                    {
+                      "id": "s3-detail",
+                      "type": "text",
+                      "bounds": {
+                        "x": 450,
+                        "y": 352,
+                        "width": 500,
+                        "height": 24
+                      },
+                      "content": "selector: [aria-label='Login']"
+                    },
+                    {
+                      "id": "s3-status",
+                      "type": "icon",
+                      "bounds": {
+                        "x": 1140,
+                        "y": 352,
+                        "width": 24,
+                        "height": 24
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "step-4",
+                  "type": "card",
+                  "bounds": {
+                    "x": 300,
+                    "y": 424,
+                    "width": 880,
+                    "height": 72
+                  },
+                  "children": [
+                    {
+                      "id": "s4-num",
+                      "type": "text",
+                      "bounds": {
+                        "x": 312,
+                        "y": 436,
+                        "width": 30,
+                        "height": 24
+                      },
+                      "content": "4."
+                    },
+                    {
+                      "id": "s4-type",
+                      "type": "button",
+                      "bounds": {
+                        "x": 348,
+                        "y": 436,
+                        "width": 90,
+                        "height": 28
+                      },
+                      "label": "assert"
+                    },
+                    {
+                      "id": "s4-detail",
+                      "type": "text",
+                      "bounds": {
+                        "x": 450,
+                        "y": 436,
+                        "width": 500,
+                        "height": 24
+                      },
+                      "content": "selector: h1 expected: 'Welcome'"
+                    },
+                    {
+                      "id": "s4-status",
+                      "type": "icon",
+                      "bounds": {
+                        "x": 1140,
+                        "y": 436,
+                        "width": 24,
+                        "height": 24
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "add-step-btn",
+                  "type": "button",
+                  "bounds": {
+                    "x": 300,
+                    "y": 510,
+                    "width": 880,
+                    "height": 40
+                  },
+                  "label": "+ Add Step"
+                }
+              ]
+            },
+            {
+              "id": "console-panel",
+              "type": "card",
+              "bounds": {
+                "x": 280,
+                "y": 650,
+                "width": 920,
+                "height": 150
+              },
+              "children": [
+                {
+                  "id": "console-title",
+                  "type": "text",
+                  "bounds": {
+                    "x": 300,
+                    "y": 658,
+                    "width": 100,
+                    "height": 20
+                  },
+                  "content": "Console Output"
+                },
+                {
+                  "id": "console-log1",
+                  "type": "text",
+                  "bounds": {
+                    "x": 300,
+                    "y": 686,
+                    "width": 860,
+                    "height": 18
+                  },
+                  "content": "[PASS] Step 1: navigate to http://localhost:8081"
+                },
+                {
+                  "id": "console-log2",
+                  "type": "text",
+                  "bounds": {
+                    "x": 300,
+                    "y": 708,
+                    "width": 860,
+                    "height": 18
+                  },
+                  "content": "[PASS] Step 2: fill [aria-label='Division'] with 'MAIN'"
+                },
+                {
+                  "id": "console-log3",
+                  "type": "text",
+                  "bounds": {
+                    "x": 300,
+                    "y": 730,
+                    "width": 860,
+                    "height": 18
+                  },
+                  "content": "[PASS] Step 3: click [aria-label='Login']"
+                },
+                {
+                  "id": "console-log4",
+                  "type": "text",
+                  "bounds": {
+                    "x": 300,
+                    "y": 752,
+                    "width": 860,
+                    "height": 18
+                  },
+                  "content": "[PASS] Step 4: assert h1 contains 'Welcome'"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

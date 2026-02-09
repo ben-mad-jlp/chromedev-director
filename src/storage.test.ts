@@ -52,6 +52,8 @@ const sampleTestResult: TestResult = {
   status: 'passed',
   steps_completed: 1,
   duration_ms: 500,
+  console_log: [],
+  network_log: [],
 };
 
 describe('Storage Module', () => {
@@ -475,6 +477,8 @@ describe('Storage Module', () => {
         status: 'passed',
         steps_completed: 1,
         duration_ms: 500,
+        console_log: [],
+        network_log: [],
       };
       const failedResult: TestResult = {
         status: 'failed',
@@ -483,6 +487,8 @@ describe('Storage Module', () => {
         error: 'Test failed',
         console_errors: [],
         duration_ms: 500,
+        console_log: [],
+        network_log: [],
       };
 
       await saveResult(config.storageDir, 'filter-result-test', passedResult);
@@ -691,6 +697,8 @@ describe('Storage Module', () => {
         console_errors: ['Error: Something went wrong'],
         dom_snapshot: '<html><body>Failed</body></html>',
         duration_ms: 1000,
+        console_log: [],
+        network_log: [],
       };
 
       await saveTest(config.storageDir, 'failed-run-test', 'Failed Run Test', sampleTestDef);
@@ -794,6 +802,8 @@ describe('Storage Module', () => {
         status: 'passed',
         steps_completed: 1,
         duration_ms: 500,
+        console_log: [],
+        network_log: [],
       };
 
       const failedResult: TestResult = {
@@ -803,6 +813,8 @@ describe('Storage Module', () => {
         error: 'Failed',
         console_errors: [],
         duration_ms: 500,
+        console_log: [],
+        network_log: [],
       };
 
       // Alternate between passed and failed
@@ -876,6 +888,8 @@ describe('Storage Module', () => {
         status: 'passed',
         steps_completed: 1,
         duration_ms: 500,
+        console_log: [],
+        network_log: [],
       };
 
       await saveResult(config.storageDir, 'status-test', passedResult);
@@ -896,6 +910,8 @@ describe('Storage Module', () => {
         error: 'Failed',
         console_errors: [],
         duration_ms: 500,
+        console_log: [],
+        network_log: [],
       };
 
       await saveResult(config.storageDir, 'failed-status-test', failedResult);
@@ -912,6 +928,8 @@ describe('Storage Module', () => {
         status: 'passed',
         steps_completed: 1,
         duration_ms: 500,
+        console_log: [],
+        network_log: [],
       };
 
       await saveResult(config.storageDir, 'no-match-status', passedResult);
@@ -1050,6 +1068,8 @@ describe('Storage Module', () => {
         console_errors: ['Error 1', 'Error 2', 'Error 3'],
         dom_snapshot: '<html><head><title>Test</title></head><body><div id="test">Content</div></body></html>',
         duration_ms: 2500,
+        console_log: [],
+        network_log: [],
       };
 
       const savedResult = await saveResult(config.storageDir, 'complete-result', completeResult);
@@ -1157,6 +1177,8 @@ describe('Storage Module', () => {
         status: 'passed',
         steps_completed: 5,
         duration_ms: 1000,
+        console_log: [],
+        network_log: [],
       };
 
       const failedResult: TestResult = {
@@ -1166,6 +1188,8 @@ describe('Storage Module', () => {
         error: 'Failed at step 3',
         console_errors: [],
         duration_ms: 500,
+        console_log: [],
+        network_log: [],
       };
 
       // Save alternating results with retention

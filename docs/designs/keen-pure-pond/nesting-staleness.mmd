@@ -1,0 +1,42 @@
+graph TD
+    subgraph PackagingTest["Packaging Station Test"]
+        direction TB
+        P_nested["[nested] Login Flow"]
+        P_step1["click: Drawer menu"]
+        P_step2["click: Packaging Station"]
+        P_nested --> P_step1 --> P_step2
+    end
+
+    subgraph LoginFlow["Login Flow"]
+        direction TB
+        L_updated["updatedAt: Jan 16 10:00am"]
+    end
+
+    subgraph Run1["Run #1 — Jan 15 3:00pm"]
+        direction TB
+        R1_status["PASSED"]
+        R1_note["Login Flow version: Jan 14"]
+    end
+
+    subgraph Run2["Run #2 — Jan 16 2:00pm"]
+        direction TB
+        R2_status["PASSED"]
+        R2_warn["Login Flow CHANGED since this run"]
+    end
+
+    subgraph Run3["Run #3 — Jan 17 9:00am"]
+        direction TB
+        R3_status["PASSED"]
+        R3_note["Login Flow version: Jan 16"]
+    end
+
+    P_nested -.->|always uses latest| LoginFlow
+
+    Run1 -.- R1_status
+    Run2 -.- R2_status
+    Run3 -.- R3_status
+
+    style R2_warn fill:#fff3cd,stroke:#ffc107
+    style R1_note fill:#d4edda,stroke:#28a745
+    style R3_note fill:#d4edda,stroke:#28a745
+    style P_nested fill:#e1f0ff,stroke:#4a9eff

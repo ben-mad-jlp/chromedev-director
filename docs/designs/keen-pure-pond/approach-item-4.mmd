@@ -1,0 +1,28 @@
+graph TD
+    subgraph "Tool Registry Pattern"
+        REG["Tool Registry Array<br/>ToolDef[]"] --> T1["run_test<br/>(enhanced)"]
+        REG --> T2["save_test"]
+        REG --> T3["get_test"]
+        REG --> T4["list_tests"]
+        REG --> T5["delete_test"]
+        REG --> T6["list_runs"]
+        REG --> T7["get_latest_run"]
+        REG --> T8["save_suite"]
+        REG --> T9["list_suites"]
+        REG --> T10["delete_suite"]
+    end
+
+    subgraph "server.ts (simplified)"
+        CREATE["createMcpServer()"] -->|"for tool of registry"| REGISTER["setRequestHandler<br/>(generic dispatcher)"]
+        REGISTER -->|"match by name"| HANDLER["tool.handler(args)"]
+    end
+
+    subgraph "Dependencies"
+        HANDLER --> STORAGE["Storage instance"]
+        HANDLER --> RUNNER["runTest()"]
+    end
+
+    style REG fill:#4a9eff,color:#fff
+    style REGISTER fill:#ff9f43,color:#fff
+    style STORAGE fill:#78e08f,color:#333
+    style RUNNER fill:#78e08f,color:#333

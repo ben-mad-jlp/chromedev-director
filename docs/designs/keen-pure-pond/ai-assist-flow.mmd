@@ -1,0 +1,35 @@
+sequenceDiagram
+    participant User as User (GUI)
+    participant UI as Web UI
+    participant API as API Server
+    participant Claude as Claude API
+    participant Engine as Test Engine
+    participant Chrome as Chrome Browser
+
+    Note over User,Chrome: "Ask AI to Create Test"
+    User->>UI: "Test that login works with<br/>valid credentials"
+    UI->>API: POST /ai/create-test<br/>{prompt, projectContext}
+    API->>API: Build system prompt with:<br/>- available step types<br/>- project URL<br/>- existing test names<br/>- DOM snapshot (optional)
+    API->>Claude: Messages API call
+    Claude->>API: TestDef JSON
+    API->>API: Save test definition
+    API->>UI: New test + preview
+    UI->>User: Shows generated steps<br/>for review before saving
+
+    Note over User,Chrome: "Ask AI to Fix"
+    User->>UI: Clicks "Ask AI to Fix"
+    UI->>API: POST /ai/fix-step<br/>{failedStep, error, consoleLog, domSnapshot}
+    API->>API: Build prompt with:<br/>- the failing step definition<br/>- error message + stack<br/>- console output<br/>- DOM snapshot at failure point
+    API->>Claude: Messages API call
+    Claude->>API: Fixed step definition +<br/>explanation of what changed
+    API->>UI: Shows diff: old vs new step
+    UI->>User: "AI suggests changing selector<br/>from X to Y because..."<br/>[Apply] [Dismiss]
+
+    Note over User,Chrome: "Ask AI to Add Steps"
+    User->>UI: "Add a step that checks the<br/>error message appears"
+    UI->>API: POST /ai/add-steps<br/>{prompt, currentTest, insertAfterStep}
+    API->>API: Build prompt with:<br/>- current test steps<br/>- where to insert<br/>- what user described
+    API->>Claude: Messages API call
+    Claude->>API: New StepDef(s)
+    API->>UI: Preview new steps in context
+    UI->>User: Shows steps inserted<br/>[Accept] [Edit] [Dismiss]

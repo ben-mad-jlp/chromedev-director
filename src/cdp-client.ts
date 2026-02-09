@@ -654,7 +654,7 @@ export class CDPClient {
    * Gets all collected console messages (non-destructive — returns a copy)
    * @returns Array of console messages with type and text
    */
-  async getConsoleMessages(): Promise<Array<{ type: string; text: string }>> {
+  async getConsoleMessages(): Promise<Array<{ type: string; text: string; timestamp: number }>> {
     return [...this.consoleMessages];
   }
 

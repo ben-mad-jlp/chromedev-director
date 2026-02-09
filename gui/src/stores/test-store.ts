@@ -26,6 +26,7 @@ export interface TestStore {
   updateTest: (test: SavedTest) => void;
   fetchTests: () => Promise<void>;
   saveTest: (test: SavedTest) => Promise<void>;
+  updateTestRemote: (testId: string, updates: { name?: string; description?: string }) => Promise<SavedTest>;
   deleteTestRemote: (testId: string) => Promise<void>;
   setError: (error: string | null) => void;
 }
@@ -114,6 +115,23 @@ export const useTestStore = create<TestStore>((set, get) => ({
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to save test';
+      set({ error: message });
+      throw error;
+    }
+  },
+
+  /**
+   * Update a test's metadata (name, description) via the API and update local state
+   */
+  updateTestRemote: async (testId: string, updates: { name?: string; description?: string }) => {
+    set({ error: null });
+    try {
+      const updatedTest = await api.updateTest(testId, updates);
+      get().updateTest(updatedTest);
+      return updatedTest;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to update test';
       set({ error: message });
       throw error;
     }

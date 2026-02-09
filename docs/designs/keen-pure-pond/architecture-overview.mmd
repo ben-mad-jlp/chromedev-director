@@ -1,0 +1,45 @@
+graph TD
+    subgraph UI["Web UI (React)"]
+        TestList["Test List Panel"]
+        TestEditor["Test Editor"]
+        RunControls["Run Controls"]
+        ResultsView["Results Dashboard"]
+    end
+
+    subgraph API["API Server (Express/Hono)"]
+        TestCRUD["Test CRUD API"]
+        RunAPI["Run Test API"]
+        ResultsAPI["Results API"]
+        WSServer["WebSocket Server"]
+    end
+
+    subgraph MCP["MCP Tools"]
+        SetupTool["setup_test"]
+        SaveTool["save_test"]
+        RunTool["run_test"]
+        GetResultsTool["get_results"]
+        ListTestsTool["list_tests"]
+    end
+
+    subgraph Engine["chromedev-director Engine"]
+        StepRunner["step-runner.ts"]
+        CDPClient["cdp-client.ts"]
+        EnvInterp["env.ts"]
+    end
+
+    subgraph Storage["Storage"]
+        TestDefs[("Test Definitions<br/>(JSON files)")]
+        ResultsDB[("Test Results<br/>(SQLite/JSON)")]
+    end
+
+    UI -->|HTTP/WS| API
+    MCP -->|Shared Logic| API
+    API --> Engine
+    Engine -->|CDP| Chrome["Chrome Browser"]
+    
+    TestCRUD --> TestDefs
+    RunAPI --> Engine
+    ResultsAPI --> ResultsDB
+    WSServer -->|Live progress| UI
+    
+    Engine -->|Results| ResultsDB

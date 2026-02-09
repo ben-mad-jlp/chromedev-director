@@ -1,0 +1,27 @@
+graph TD
+    subgraph "Current: run_test accepts TestDef only"
+        CLAUDE["Claude"] -->|"TestDef JSON<br/>{url, steps[], before[], after[]}"| MCP["run_test MCP tool<br/>server.ts"]
+        MCP -->|"runTest(testDef, port)"| RUNNER["step-runner.ts"]
+        RUNNER -->|"executeStep()"| DISPATCH{Step type?}
+        DISPATCH --> EVAL["eval"]
+        DISPATCH --> FILL["fill"]
+        DISPATCH --> CLICK["click"]
+        DISPATCH --> ASSERT["assert"]
+        DISPATCH --> WAIT["wait"]
+        DISPATCH --> WAIT_FOR["wait_for"]
+        DISPATCH --> CONSOLE["console_check"]
+        DISPATCH --> NETWORK["network_check"]
+        DISPATCH --> MOCK["mock_network"]
+    end
+
+    subgraph "Gap: No run_test StepDef variant"
+        NOTE1["Cannot call run_test as a step<br/>inside another test"]
+        NOTE2["No way to compose tests<br/>from smaller tests"]
+        NOTE3["No sub-test / nested test concept"]
+    end
+
+    style MCP fill:#4a9eff,color:#fff
+    style RUNNER fill:#ff9f43,color:#fff
+    style NOTE1 fill:#ff6b6b,color:#fff
+    style NOTE2 fill:#ff6b6b,color:#fff
+    style NOTE3 fill:#ff6b6b,color:#fff

@@ -42,8 +42,8 @@ describe("suite-runner", () => {
       .mockResolvedValueOnce(mockTest2); // running test-2
 
     (runTest as any)
-      .mockResolvedValueOnce({ status: "passed", steps_completed: 1, duration_ms: 100 })
-      .mockResolvedValueOnce({ status: "passed", steps_completed: 2, duration_ms: 200 });
+      .mockResolvedValueOnce({ status: "passed", steps_completed: 1, duration_ms: 100, console_log: [], network_log: [] })
+      .mockResolvedValueOnce({ status: "passed", steps_completed: 2, duration_ms: 200, console_log: [], network_log: [] });
 
     (storage.saveRun as any)
       .mockResolvedValueOnce({ id: "run-1" })
@@ -78,6 +78,8 @@ describe("suite-runner", () => {
       status: "passed",
       steps_completed: 1,
       duration_ms: 50,
+      console_log: [],
+      network_log: [],
     });
 
     (storage.saveRun as any).mockResolvedValueOnce({ id: "run-1" });
@@ -104,8 +106,8 @@ describe("suite-runner", () => {
       .mockResolvedValueOnce(mockTest2); // run test-2
 
     (runTest as any)
-      .mockResolvedValueOnce({ status: "failed", failed_step: 0, error: "assertion failed", console_errors: [], duration_ms: 100 })
-      .mockResolvedValueOnce({ status: "passed", steps_completed: 1, duration_ms: 200 });
+      .mockResolvedValueOnce({ status: "failed", failed_step: 0, error: "assertion failed", console_errors: [], duration_ms: 100, console_log: [], network_log: [] })
+      .mockResolvedValueOnce({ status: "passed", steps_completed: 1, duration_ms: 200, console_log: [], network_log: [] });
 
     (storage.saveRun as any)
       .mockResolvedValueOnce({ id: "run-1" })
@@ -134,7 +136,7 @@ describe("suite-runner", () => {
       .mockResolvedValueOnce(mockTest1); // run test-1 (test-2 is skipped)
 
     (runTest as any)
-      .mockResolvedValueOnce({ status: "failed", failed_step: 0, error: "fail", console_errors: [], duration_ms: 100 });
+      .mockResolvedValueOnce({ status: "failed", failed_step: 0, error: "fail", console_errors: [], duration_ms: 100, console_log: [], network_log: [] });
 
     (storage.saveRun as any).mockResolvedValueOnce({ id: "run-1" });
 
@@ -167,6 +169,8 @@ describe("suite-runner", () => {
       status: "passed",
       steps_completed: 1,
       duration_ms: 50,
+      console_log: [],
+      network_log: [],
     });
 
     (storage.saveRun as any).mockResolvedValueOnce({ id: "run-1" });
@@ -194,6 +198,8 @@ describe("suite-runner", () => {
       status: "passed",
       steps_completed: 1,
       duration_ms: 50,
+      console_log: [],
+      network_log: [],
     });
 
     (storage.saveRun as any).mockResolvedValueOnce({ id: "run-1" });

@@ -1,0 +1,36 @@
+sequenceDiagram
+    participant User
+    participant GUI as React GUI
+    participant Store as runStore
+    participant API as API Server
+    participant WS as WebSocket
+    participant Runner as Test Runner
+
+    User->>GUI: Click "Run" button
+    GUI->>Store: startRun(testId)
+    Store->>API: POST /api/tests/:id/run
+    API->>Runner: runTest(def, onEvent)
+    API->>WS: broadcast run:start
+    WS->>Store: handleWsMessage(run:start)
+    Store->>GUI: activeRun set, steps → pending
+
+    loop For each step
+        Runner->>API: onEvent(step:start)
+        API->>WS: broadcast run:step (running)
+        WS->>Store: handleWsMessage(run:step)
+        Store->>GUI: stepStatuses[i] = running
+        Note over GUI: Step card shows spinner
+
+        Runner->>API: onEvent(step:pass/fail)
+        API->>WS: broadcast run:step (passed/failed)
+        WS->>Store: handleWsMessage(run:step)
+        Store->>GUI: stepStatuses[i] = passed/failed
+        Note over GUI: Step card shows ✓ or ✗
+    end
+
+    Runner->>API: test complete
+    API->>WS: broadcast run:complete
+    WS->>Store: handleWsMessage(run:complete)
+    Store->>GUI: activeRun = null
+    Store->>Store: fetchTests() refresh
+    Note over GUI: Run button re-enabled

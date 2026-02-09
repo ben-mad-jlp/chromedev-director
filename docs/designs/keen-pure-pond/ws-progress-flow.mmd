@@ -1,0 +1,23 @@
+sequenceDiagram
+    participant GUI as React GUI
+    participant WS as WebSocket /ws
+    participant API as POST /api/tests/:id/run
+    participant Runner as runTest()
+    participant CDP as Chrome CDP
+
+    GUI->>WS: connect
+    GUI->>API: POST /tests/login-flow/run
+    API->>Runner: runTest(def, port, onEvent)
+    Runner->>CDP: navigate + steps
+
+    loop Each Step
+        Runner-->>API: onEvent(step:start)
+        API-->>WS: broadcast {type: run:step, status: running}
+        CDP-->>Runner: step result
+        Runner-->>API: onEvent(step:pass)
+        API-->>WS: broadcast {type: run:step, status: passed}
+    end
+
+    Runner-->>API: return TestResult
+    API-->>WS: broadcast {type: run:complete, result}
+    API-->>GUI: 200 {runId, result}

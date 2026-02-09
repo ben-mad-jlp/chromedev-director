@@ -1,0 +1,28 @@
+graph TD
+    CLI["CLI: npx chromedev-director gui --port 3838"]
+    CLI --> Hono["Hono Server<br/>@hono/node-server"]
+
+    subgraph Routes["API Routes"]
+        Tests["GET/POST /api/tests<br/>GET/PUT/DELETE /api/tests/:id"]
+        Run["POST /api/tests/:id/run"]
+        Results["GET /api/tests/:id/results<br/>GET /api/results/:runId"]
+        Chrome["GET /api/chrome/status"]
+    end
+
+    subgraph Middleware["Middleware"]
+        RunLock["Run Lock<br/>409 if busy"]
+    end
+
+    Hono --> Routes
+    Hono --> Static["Static Files<br/>gui/dist/"]
+    Hono --> WS["WebSocket /ws<br/>@hono/node-ws"]
+
+    Tests --> Storage["storage.ts"]
+    Run --> RunLock
+    RunLock --> Runner["step-runner.ts<br/>runTest(def, port, onEvent)"]
+    Runner -.->|"onEvent"| WS
+    Results --> Storage
+    Chrome --> Probe["fetch localhost:port/json/version"]
+
+    style Middleware fill:#fff3e0,stroke:#f57c00
+    style Routes fill:#e3f2fd,stroke:#1976d2

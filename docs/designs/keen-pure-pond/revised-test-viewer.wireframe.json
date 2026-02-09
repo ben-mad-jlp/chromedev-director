@@ -1,0 +1,584 @@
+{
+  "viewport": "desktop",
+  "direction": "LR",
+  "screens": [
+    {
+      "id": "main",
+      "type": "screen",
+      "name": "Test Dashboard",
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 1200,
+        "height": 850
+      },
+      "children": [
+        {
+          "id": "appbar",
+          "type": "appbar",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1200,
+            "height": 56
+          },
+          "children": [
+            {
+              "id": "app-title",
+              "type": "text",
+              "bounds": {
+                "x": 60,
+                "y": 16,
+                "width": 200,
+                "height": 24
+              },
+              "content": "chromedev-director"
+            },
+            {
+              "id": "chrome-status",
+              "type": "button",
+              "bounds": {
+                "x": 950,
+                "y": 12,
+                "width": 130,
+                "height": 32
+              },
+              "label": "Chrome: Connected"
+            },
+            {
+              "id": "settings-btn",
+              "type": "icon",
+              "bounds": {
+                "x": 1150,
+                "y": 12,
+                "width": 32,
+                "height": 32
+              }
+            }
+          ]
+        },
+        {
+          "id": "sidebar",
+          "type": "col",
+          "bounds": {
+            "x": 0,
+            "y": 56,
+            "width": 280,
+            "height": 794
+          },
+          "children": [
+            {
+              "id": "sidebar-label",
+              "type": "text",
+              "bounds": {
+                "x": 16,
+                "y": 68,
+                "width": 100,
+                "height": 20
+              },
+              "content": "Saved Tests"
+            },
+            {
+              "id": "search",
+              "type": "input",
+              "bounds": {
+                "x": 12,
+                "y": 96,
+                "width": 256,
+                "height": 36
+              },
+              "placeholder": "Search tests..."
+            },
+            {
+              "id": "test-tree",
+              "type": "list",
+              "bounds": {
+                "x": 0,
+                "y": 144,
+                "width": 280,
+                "height": 650
+              },
+              "items": [
+                {
+                  "label": "Login Flow",
+                  "icon": "check-circle",
+                  "active": true
+                },
+                {
+                  "label": "Packaging Station",
+                  "icon": "check-circle"
+                },
+                {
+                  "label": "Full E2E Suite",
+                  "icon": "x-circle"
+                },
+                {
+                  "label": "Form Validation",
+                  "icon": "clock"
+                },
+                {
+                  "label": "API Mock Test",
+                  "icon": "check-circle"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "main-area",
+          "type": "col",
+          "bounds": {
+            "x": 280,
+            "y": 56,
+            "width": 920,
+            "height": 794
+          },
+          "children": [
+            {
+              "id": "header-row",
+              "type": "row",
+              "bounds": {
+                "x": 280,
+                "y": 56,
+                "width": 920,
+                "height": 56
+              },
+              "children": [
+                {
+                  "id": "test-name",
+                  "type": "title",
+                  "bounds": {
+                    "x": 300,
+                    "y": 68,
+                    "width": 300,
+                    "height": 32
+                  },
+                  "content": "Packaging Station"
+                },
+                {
+                  "id": "run-btn",
+                  "type": "button",
+                  "bounds": {
+                    "x": 990,
+                    "y": 68,
+                    "width": 100,
+                    "height": 36
+                  },
+                  "label": "Run"
+                },
+                {
+                  "id": "run-all-btn",
+                  "type": "button",
+                  "bounds": {
+                    "x": 1100,
+                    "y": 68,
+                    "width": 80,
+                    "height": 36
+                  },
+                  "label": "Suite"
+                }
+              ]
+            },
+            {
+              "id": "tabs",
+              "type": "bottomnav",
+              "bounds": {
+                "x": 280,
+                "y": 112,
+                "width": 920,
+                "height": 40
+              },
+              "items": [
+                {
+                  "label": "Steps",
+                  "active": true
+                },
+                {
+                  "label": "Results"
+                },
+                {
+                  "label": "History"
+                }
+              ]
+            },
+            {
+              "id": "steps-area",
+              "type": "col",
+              "bounds": {
+                "x": 280,
+                "y": 152,
+                "width": 920,
+                "height": 460
+              },
+              "children": [
+                {
+                  "id": "nested-block",
+                  "type": "card",
+                  "bounds": {
+                    "x": 300,
+                    "y": 160,
+                    "width": 880,
+                    "height": 140
+                  },
+                  "children": [
+                    {
+                      "id": "nested-icon",
+                      "type": "text",
+                      "bounds": {
+                        "x": 316,
+                        "y": 168,
+                        "width": 20,
+                        "height": 20
+                      },
+                      "content": "v"
+                    },
+                    {
+                      "id": "nested-label",
+                      "type": "text",
+                      "bounds": {
+                        "x": 344,
+                        "y": 168,
+                        "width": 200,
+                        "height": 22
+                      },
+                      "content": "[nested] Login Flow"
+                    },
+                    {
+                      "id": "nested-badge",
+                      "type": "button",
+                      "bounds": {
+                        "x": 560,
+                        "y": 168,
+                        "width": 60,
+                        "height": 22
+                      },
+                      "label": "6 steps"
+                    },
+                    {
+                      "id": "ns1",
+                      "type": "text",
+                      "bounds": {
+                        "x": 344,
+                        "y": 198,
+                        "width": 600,
+                        "height": 18
+                      },
+                      "content": "1. navigate  localhost:8081"
+                    },
+                    {
+                      "id": "ns2",
+                      "type": "text",
+                      "bounds": {
+                        "x": 344,
+                        "y": 220,
+                        "width": 600,
+                        "height": 18
+                      },
+                      "content": "2. fill  Division = MAIN"
+                    },
+                    {
+                      "id": "ns3",
+                      "type": "text",
+                      "bounds": {
+                        "x": 344,
+                        "y": 242,
+                        "width": 600,
+                        "height": 18
+                      },
+                      "content": "3. fill  Employee = John Smith"
+                    },
+                    {
+                      "id": "ns4",
+                      "type": "text",
+                      "bounds": {
+                        "x": 344,
+                        "y": 264,
+                        "width": 600,
+                        "height": 18
+                      },
+                      "content": "4. click  Login button"
+                    }
+                  ]
+                },
+                {
+                  "id": "step-own-1",
+                  "type": "card",
+                  "bounds": {
+                    "x": 300,
+                    "y": 312,
+                    "width": 880,
+                    "height": 56
+                  },
+                  "children": [
+                    {
+                      "id": "s1-toggle",
+                      "type": "icon",
+                      "bounds": {
+                        "x": 316,
+                        "y": 324,
+                        "width": 20,
+                        "height": 20
+                      }
+                    },
+                    {
+                      "id": "s1-type",
+                      "type": "button",
+                      "bounds": {
+                        "x": 344,
+                        "y": 322,
+                        "width": 70,
+                        "height": 24
+                      },
+                      "label": "click"
+                    },
+                    {
+                      "id": "s1-detail",
+                      "type": "text",
+                      "bounds": {
+                        "x": 424,
+                        "y": 324,
+                        "width": 500,
+                        "height": 20
+                      },
+                      "content": "Drawer menu icon"
+                    },
+                    {
+                      "id": "s1-status",
+                      "type": "icon",
+                      "bounds": {
+                        "x": 1140,
+                        "y": 324,
+                        "width": 24,
+                        "height": 24
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "step-own-2",
+                  "type": "card",
+                  "bounds": {
+                    "x": 300,
+                    "y": 376,
+                    "width": 880,
+                    "height": 56
+                  },
+                  "children": [
+                    {
+                      "id": "s2-toggle",
+                      "type": "icon",
+                      "bounds": {
+                        "x": 316,
+                        "y": 388,
+                        "width": 20,
+                        "height": 20
+                      }
+                    },
+                    {
+                      "id": "s2-type",
+                      "type": "button",
+                      "bounds": {
+                        "x": 344,
+                        "y": 386,
+                        "width": 70,
+                        "height": 24
+                      },
+                      "label": "click"
+                    },
+                    {
+                      "id": "s2-detail",
+                      "type": "text",
+                      "bounds": {
+                        "x": 424,
+                        "y": 388,
+                        "width": 500,
+                        "height": 20
+                      },
+                      "content": "Packaging Station menu item"
+                    },
+                    {
+                      "id": "s2-status",
+                      "type": "icon",
+                      "bounds": {
+                        "x": 1140,
+                        "y": 388,
+                        "width": 24,
+                        "height": 24
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "step-own-3",
+                  "type": "card",
+                  "bounds": {
+                    "x": 300,
+                    "y": 440,
+                    "width": 880,
+                    "height": 56
+                  },
+                  "children": [
+                    {
+                      "id": "s3-toggle",
+                      "type": "icon",
+                      "bounds": {
+                        "x": 316,
+                        "y": 452,
+                        "width": 20,
+                        "height": 20
+                      }
+                    },
+                    {
+                      "id": "s3-type",
+                      "type": "button",
+                      "bounds": {
+                        "x": 344,
+                        "y": 450,
+                        "width": 70,
+                        "height": 24
+                      },
+                      "label": "assert"
+                    },
+                    {
+                      "id": "s3-detail",
+                      "type": "text",
+                      "bounds": {
+                        "x": 424,
+                        "y": 452,
+                        "width": 500,
+                        "height": 20
+                      },
+                      "content": "Station name is visible on page"
+                    },
+                    {
+                      "id": "s3-status",
+                      "type": "icon",
+                      "bounds": {
+                        "x": 1140,
+                        "y": 452,
+                        "width": 24,
+                        "height": 24
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "compose-drop",
+                  "type": "card",
+                  "bounds": {
+                    "x": 300,
+                    "y": 508,
+                    "width": 880,
+                    "height": 48
+                  },
+                  "children": [
+                    {
+                      "id": "drop-text",
+                      "type": "text",
+                      "bounds": {
+                        "x": 420,
+                        "y": 518,
+                        "width": 400,
+                        "height": 20
+                      },
+                      "content": "Drop a saved test here to nest it"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "console",
+              "type": "card",
+              "bounds": {
+                "x": 280,
+                "y": 624,
+                "width": 920,
+                "height": 226
+              },
+              "children": [
+                {
+                  "id": "console-label",
+                  "type": "text",
+                  "bounds": {
+                    "x": 300,
+                    "y": 632,
+                    "width": 120,
+                    "height": 20
+                  },
+                  "content": "Run Output"
+                },
+                {
+                  "id": "log1",
+                  "type": "text",
+                  "bounds": {
+                    "x": 300,
+                    "y": 662,
+                    "width": 860,
+                    "height": 18
+                  },
+                  "content": "[PASS] Login Flow > navigate localhost:8081"
+                },
+                {
+                  "id": "log2",
+                  "type": "text",
+                  "bounds": {
+                    "x": 300,
+                    "y": 684,
+                    "width": 860,
+                    "height": 18
+                  },
+                  "content": "[PASS] Login Flow > fill Division = MAIN"
+                },
+                {
+                  "id": "log3",
+                  "type": "text",
+                  "bounds": {
+                    "x": 300,
+                    "y": 706,
+                    "width": 860,
+                    "height": 18
+                  },
+                  "content": "[PASS] Login Flow > click Login"
+                },
+                {
+                  "id": "log4",
+                  "type": "text",
+                  "bounds": {
+                    "x": 300,
+                    "y": 728,
+                    "width": 860,
+                    "height": 18
+                  },
+                  "content": "[PASS] click Drawer menu"
+                },
+                {
+                  "id": "log5",
+                  "type": "text",
+                  "bounds": {
+                    "x": 300,
+                    "y": 750,
+                    "width": 860,
+                    "height": 18
+                  },
+                  "content": "[FAIL] click Packaging Station - timeout after 5s"
+                },
+                {
+                  "id": "log6",
+                  "type": "text",
+                  "bounds": {
+                    "x": 300,
+                    "y": 772,
+                    "width": 860,
+                    "height": 18
+                  },
+                  "content": "  > Element not found: [data-testid='packaging-link']"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

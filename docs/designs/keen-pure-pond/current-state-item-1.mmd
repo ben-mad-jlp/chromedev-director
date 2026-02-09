@@ -1,0 +1,24 @@
+graph TD
+    subgraph "Current Architecture (No Storage)"
+        MCP["server.ts<br/>MCP Server<br/>run_test tool"]
+        SR["step-runner.ts<br/>runTest() / runSteps()<br/>Ephemeral vars map"]
+        CDP["cdp-client.ts<br/>CDP wrapper<br/>Console/Network/Mock"]
+        ENV["env.ts<br/>$env/$vars interpolation"]
+        TYPES["types.ts<br/>TestDef, StepDef, TestResult"]
+    end
+
+    MCP -->|"TestDef JSON"| SR
+    SR -->|"connect/navigate/evaluate"| CDP
+    SR -->|"interpolateStep()"| ENV
+    SR -->|"types"| TYPES
+
+    subgraph "Data Flow (Fire &amp; Forget)"
+        IN["Claude sends TestDef"] --> EXEC["Execute steps sequentially"]
+        EXEC --> OUT["Return TestResult JSON"]
+    end
+
+    style MCP fill:#4a9eff,color:#fff
+    style SR fill:#ff9f43,color:#fff
+    style CDP fill:#ee5a24,color:#fff
+    style ENV fill:#78e08f,color:#333
+    style TYPES fill:#b8e994,color:#333

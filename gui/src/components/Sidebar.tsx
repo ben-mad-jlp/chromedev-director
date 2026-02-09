@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Search } from 'lucide-react';
+import { Search, FolderOpen } from 'lucide-react';
 import { useUIStore } from '@/stores/ui-store';
+import { useTestStore } from '@/stores/test-store';
 import TestList from '@/features/tests/TestList';
-import type { SavedTest } from '@/lib/types';
-import * as api from '@/lib/api';
+import OpenProjectDialog from './OpenProjectDialog';
 
 /**
  * Sidebar component
@@ -15,53 +15,28 @@ import * as api from '@/lib/api';
  *
  * Features:
  * - Wired to ui-store for search query and sidebar state
- * - Fetches and displays saved tests
+ * - Uses test-store for tests (stays in sync after rename/delete)
  * - Search filtering on test name, description, and tags
  * - Loading and error states
- * - Settings and about links (optional)
  */
 export const Sidebar: React.FC = () => {
   const { searchQuery, setSearchQuery } = useUIStore();
-  const [tests, setTests] = useState<SavedTest[]>([]);
-  const [selectedTestId, setSelectedTestId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { tests, isLoading, error, fetchTests, selectedTestId, selectTest } = useTestStore();
+  const [showOpenProject, setShowOpenProject] = useState(false);
 
   // Fetch tests on mount
   useEffect(() => {
-    const fetchTests = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        const fetchedTests = await api.listTests();
-        setTests(fetchedTests);
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : 'Failed to load tests'
-        );
-        setTests([]);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     fetchTests();
-  }, []);
+  }, [fetchTests]);
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(e.target.value);
-  };
-
-  const handleSelectTest = (test: SavedTest) => {
-    setSelectedTestId(test.id);
   };
 
   return (
     <div className="w-full h-full flex flex-col bg-white">
       {/* Header */}
       <div className="p-4 border-b border-gray-200 flex-shrink-0">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Tests</h2>
-
         {/* Search input */}
         <div className="relative">
           <Search
@@ -95,7 +70,7 @@ export const Sidebar: React.FC = () => {
           <TestList
             tests={tests}
             selectedTestId={selectedTestId}
-            onSelect={handleSelectTest}
+            onSelect={(test) => selectTest(test.id)}
             searchQuery={searchQuery}
           />
         )}
@@ -103,8 +78,19 @@ export const Sidebar: React.FC = () => {
 
       {/* Footer */}
       <div className="border-t border-gray-200 p-2 flex-shrink-0">
-        <p className="text-xs text-gray-400 text-center">chromedev-director</p>
+        <button
+          onClick={() => setShowOpenProject(true)}
+          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
+        >
+          <FolderOpen size={16} className="text-gray-400" />
+          Open Project...
+        </button>
       </div>
+
+      <OpenProjectDialog
+        open={showOpenProject}
+        onClose={() => setShowOpenProject(false)}
+      />
     </div>
   );
 };
