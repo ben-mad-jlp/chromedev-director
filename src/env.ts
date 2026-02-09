@@ -270,6 +270,24 @@ export function interpolateStep(
     };
   }
 
+  // http_request step
+  if ("http_request" in step) {
+    return {
+      ...common,
+      http_request: {
+        url: interpolate(step.http_request.url, env, vars),
+        ...(step.http_request.method != null ? { method: step.http_request.method } : {}),
+        ...(step.http_request.body != null
+          ? { body: typeof step.http_request.body === "string"
+              ? interpolate(step.http_request.body, env, vars)
+              : step.http_request.body }
+          : {}),
+        ...(step.http_request.headers != null ? { headers: step.http_request.headers } : {}),
+        ...(step.http_request.as != null ? { as: step.http_request.as } : {}),
+      },
+    };
+  }
+
   // Fallback: return the step as-is (shouldn't reach here with valid StepDef)
   return step;
 }

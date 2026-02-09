@@ -1071,6 +1071,200 @@ describe("step-runner", () => {
     });
   });
 
+  describe("http_request step", () => {
+    it("makes a successful GET request", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        headers: new Map([["content-type", "application/json"]]) as any,
+        json: () => Promise.resolve({ status: "ok" }),
+      } as any);
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { http_request: { url: "http://localhost:3001/health" } } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "http://localhost:3001/health",
+        expect.objectContaining({ method: "GET" })
+      );
+
+      globalThis.fetch = originalFetch;
+    });
+
+    it("makes a POST request with body", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        headers: new Map([["content-type", "application/json"]]) as any,
+        json: () => Promise.resolve({ reset: true }),
+      } as any);
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { http_request: { url: "http://localhost:3001/seed/reset", method: "POST", body: { scenario: "login" } } } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "http://localhost:3001/seed/reset",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ scenario: "login" }),
+        })
+      );
+
+      globalThis.fetch = originalFetch;
+    });
+
+    it("stores response in vars via 'as' field", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        headers: new Map([["content-type", "application/json"]]) as any,
+        json: () => Promise.resolve({ id: 42, name: "Test" }),
+      } as any);
+      mockClient.evaluate.mockResolvedValueOnce(true);
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { http_request: { url: "http://localhost:3001/data", as: "apiData" } } as any,
+          { eval: "true" },
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+
+      globalThis.fetch = originalFetch;
+    });
+
+    it("fails on non-ok response", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: "Internal Server Error",
+      } as any);
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { http_request: { url: "http://localhost:3001/fail" } } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("failed");
+      expect((result as any).error).toContain("500");
+
+      globalThis.fetch = originalFetch;
+    });
+
+    it("fails on network error", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockRejectedValueOnce(new Error("fetch failed"));
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { http_request: { url: "http://localhost:9999/unreachable" } } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("failed");
+      expect((result as any).error).toContain("fetch failed");
+
+      globalThis.fetch = originalFetch;
+    });
+
+    it("sends custom headers", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        headers: new Map([["content-type", "text/plain"]]) as any,
+        text: () => Promise.resolve("OK"),
+      } as any);
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { http_request: { url: "http://localhost:3001/auth", headers: { "Authorization": "Bearer token123" } } } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "http://localhost:3001/auth",
+        expect.objectContaining({
+          headers: expect.objectContaining({ "Authorization": "Bearer token123" }),
+        })
+      );
+
+      globalThis.fetch = originalFetch;
+    });
+
+    it("interpolates $env in URL", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        headers: new Map([["content-type", "text/plain"]]) as any,
+        text: () => Promise.resolve("OK"),
+      } as any);
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        env: { MOCK_API: "http://localhost:3001" },
+        steps: [
+          { http_request: { url: "$env.MOCK_API/seed/reset", method: "POST" } } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "http://localhost:3001/seed/reset",
+        expect.objectContaining({ method: "POST" })
+      );
+
+      globalThis.fetch = originalFetch;
+    });
+
+    it("does not send body on GET requests", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        headers: new Map([["content-type", "text/plain"]]) as any,
+        text: () => Promise.resolve("OK"),
+      } as any);
+
+      const testDef: TestDef = {
+        url: "https://example.com",
+        steps: [
+          { http_request: { url: "http://localhost:3001/data", body: { should: "be ignored" } } } as any,
+        ],
+      };
+
+      const result = await runSteps(mockClient, testDef);
+      expect(result.status).toBe("passed");
+      const fetchCall = (globalThis.fetch as any).mock.calls[0][1];
+      expect(fetchCall.body).toBeUndefined();
+
+      globalThis.fetch = originalFetch;
+    });
+  });
+
   describe("conditional steps (if field)", () => {
     it("skips step when if condition is falsy", async () => {
       mockClient.evaluate.mockResolvedValueOnce(false); // if condition

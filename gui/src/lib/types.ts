@@ -99,7 +99,19 @@ export type StepDef =
   /** Switch execution context to an iframe (by selector) or back to main frame (omit selector). */
   | { label?: string; if?: string; switch_frame: { selector?: string } }
   /** Configure auto-handling for future JS dialogs (alert/confirm/prompt). */
-  | { label?: string; if?: string; handle_dialog: { action: "accept" | "dismiss"; text?: string } };
+  | { label?: string; if?: string; handle_dialog: { action: "accept" | "dismiss"; text?: string } }
+  /** Make a server-side HTTP request (Node fetch). Useful for API setup/teardown in before hooks. */
+  | {
+      label?: string;
+      if?: string;
+      http_request: {
+        url: string;
+        method?: string;
+        body?: unknown;
+        headers?: Record<string, string>;
+        as?: string;
+      };
+    };
 
 /**
  * Test execution result

@@ -30,6 +30,7 @@ function getStepType(step: StepDef): string {
   if ('hover' in step) return 'hover';
   if ('switch_frame' in step) return 'switch_frame';
   if ('handle_dialog' in step) return 'handle_dialog';
+  if ('http_request' in step) return 'http_request';
   return 'unknown';
 }
 
@@ -121,6 +122,15 @@ function getStepLabel(step: StepDef): string {
         return `Dialog: ${step.handle_dialog.action}`;
       }
       break;
+    case 'http_request':
+      if ('http_request' in step) {
+        const method = step.http_request.method || 'GET';
+        const url = step.http_request.url.length > 40
+          ? step.http_request.url.slice(0, 40) + '...'
+          : step.http_request.url;
+        return `${method} ${url}`;
+      }
+      break;
   }
 
   return 'Unknown step';
@@ -164,6 +174,8 @@ function getBadgeVariant(
     case 'switch_frame':
       return 'outline';
     case 'handle_dialog':
+      return 'outline';
+    case 'http_request':
       return 'outline';
     default:
       return 'default';
@@ -270,6 +282,16 @@ function getStepDetails(step: StepDef): React.ReactNode {
     return (
       <div className="text-sm text-muted-foreground mt-1">
         <span className="font-mono">{step.switch_frame.selector}</span>
+      </div>
+    );
+  }
+
+  if ('http_request' in step) {
+    return (
+      <div className="text-sm text-muted-foreground mt-1">
+        <span className="font-mono">{step.http_request.url}</span>
+        {' '}&rarr;{' '}
+        <span>{step.http_request.method || 'GET'}</span>
       </div>
     );
   }
@@ -494,6 +516,41 @@ function getStepFullDetails(step: StepDef): React.ReactNode {
         {step.handle_dialog.text != null && (
           <p className="text-xs text-gray-500">
             Prompt text: {step.handle_dialog.text}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  if ('http_request' in step) {
+    return (
+      <div className="mt-2 space-y-1">
+        <p className="text-xs font-semibold text-gray-500">URL</p>
+        <pre className="text-xs font-mono bg-gray-100 rounded p-2 whitespace-pre-wrap break-words overflow-x-auto">
+          {step.http_request.url}
+        </pre>
+        <p className="text-xs font-semibold text-gray-500">Method: {step.http_request.method || 'GET'}</p>
+        {step.http_request.body != null && (
+          <>
+            <p className="text-xs font-semibold text-gray-500">Body</p>
+            <pre className="text-xs font-mono bg-gray-100 rounded p-2 whitespace-pre-wrap break-words overflow-x-auto">
+              {typeof step.http_request.body === 'string'
+                ? step.http_request.body
+                : JSON.stringify(step.http_request.body, null, 2)}
+            </pre>
+          </>
+        )}
+        {step.http_request.headers != null && (
+          <>
+            <p className="text-xs font-semibold text-gray-500">Headers</p>
+            <pre className="text-xs font-mono bg-gray-100 rounded p-2 whitespace-pre-wrap break-words overflow-x-auto">
+              {JSON.stringify(step.http_request.headers, null, 2)}
+            </pre>
+          </>
+        )}
+        {step.http_request.as && (
+          <p className="text-xs text-gray-500">
+            Stores response in <span className="font-mono">$vars.{step.http_request.as}</span>
           </p>
         )}
       </div>

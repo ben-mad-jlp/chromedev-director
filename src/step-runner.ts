@@ -50,6 +50,7 @@ function getStepType(step: StepDef): string {
   if ("hover" in step) return "hover";
   if ("switch_frame" in step) return "switch_frame";
   if ("handle_dialog" in step) return "handle_dialog";
+  if ("http_request" in step) return "http_request";
   return "unknown";
 }
 
@@ -128,6 +129,41 @@ async function runTestInner(
 
   const beforeHooks = testDef.before || [];
 
+  // Phase 0: Run http_request before hooks BEFORE CDP connect (server-side, no CDP needed)
+  for (let i = 0; i < beforeHooks.length; i++) {
+    const hook = beforeHooks[i];
+    if (!("http_request" in hook)) continue;
+
+    const label = hook.label || `Before hook ${i + 1}`;
+    const hookStartTime = Date.now();
+
+    emit(onEvent, { type: "step:start", stepIndex: -(i + 1), label, nested: null });
+
+    const interpolatedHook = interpolateStep(hook, testDef.env || {}, vars);
+    const result = await executeStep(interpolatedHook, client, vars, onEvent, projectRoot, context, true);
+    const duration = Date.now() - hookStartTime;
+
+    // Store response in vars if 'as' field is present
+    if ("http_request" in interpolatedHook && interpolatedHook.http_request.as && result.success && "value" in result) {
+      vars[interpolatedHook.http_request.as] = result.value;
+    }
+
+    if (!result.success) {
+      emit(onEvent, { type: "step:fail", stepIndex: -(i + 1), label, nested: null, duration_ms: duration, error: result.error || "Unknown error" });
+      await runAfterHooks(testDef.after || [], testDef.env || {}, client, vars, onEvent, projectRoot, context);
+      return {
+        status: "failed",
+        failed_step: -(i + 1),
+        step_definition: hook,
+        error: `Before hook ${i} failed: ${result.error}`,
+        console_errors: [],
+        duration_ms: Date.now() - startTime,
+      };
+    }
+
+    emit(onEvent, { type: "step:pass", stepIndex: -(i + 1), label, nested: null, duration_ms: duration });
+  }
+
   // Phase 1: Run mock_network before hooks BEFORE navigation so rules are registered in time
   for (let i = 0; i < beforeHooks.length; i++) {
     const hook = beforeHooks[i];
@@ -162,10 +198,10 @@ async function runTestInner(
   // Navigate to the test URL (after mock rules are set up)
   await client.navigate(testDef.url);
 
-  // Phase 2: Run non-mock_network before hooks AFTER navigation so page JS context is available
+  // Phase 2: Run remaining before hooks AFTER navigation so page JS context is available
   for (let i = 0; i < beforeHooks.length; i++) {
     const hook = beforeHooks[i];
-    if ("mock_network" in hook) continue;
+    if ("mock_network" in hook || "http_request" in hook) continue;
 
     const label = hook.label || `Before hook ${i + 1}`;
     const hookStartTime = Date.now();
@@ -209,7 +245,7 @@ async function runTestInner(
     }
 
     const skippedSteps = testDef.steps.slice(0, testDef.resume_from);
-    const hasVarStorage = skippedSteps.some((s: any) => s.as);
+    const hasVarStorage = skippedSteps.some((s: any) => s.as || s.http_request?.as);
     if (hasVarStorage) {
       console.warn("Skipped steps contain variable storage; re-running from start");
     } else {
@@ -235,9 +271,13 @@ async function runTestInner(
     const step = interpolateStep(rawStep, testDef.env || {}, vars);
     const result = await executeStep(step, client, vars, onEvent, projectRoot, context);
 
-    // Store variable if eval step has 'as' field (not skipped)
+    // Store variable if step has 'as' field (not skipped)
     if ("as" in step && step.as && "value" in result && result.success && !result.skipped) {
       vars[step.as] = result.value;
+    }
+    // http_request stores 'as' inside http_request object
+    if ("http_request" in step && step.http_request.as && "value" in result && result.success && !result.skipped) {
+      vars[step.http_request.as] = result.value;
     }
 
     if (!result.success) {
@@ -379,7 +419,7 @@ export async function runSteps(
 
     // Check if any skipped steps have 'as' field (variable storage)
     const skippedSteps = testDef.steps.slice(0, testDef.resume_from);
-    const hasVarStorage = skippedSteps.some((s: any) => s.as);
+    const hasVarStorage = skippedSteps.some((s: any) => s.as || s.http_request?.as);
 
     if (hasVarStorage) {
       // Skipped steps contain variable storage; re-run from start
@@ -427,6 +467,10 @@ export async function runSteps(
       // Store result in vars if step has `as` field (not skipped, not failed)
       if ("as" in step && step.as && result.success && !result.skipped) {
         vars[step.as] = result.value;
+      }
+      // http_request stores 'as' inside http_request object
+      if ("http_request" in step && step.http_request.as && result.success && !result.skipped && "value" in result) {
+        vars[step.http_request.as] = result.value;
       }
 
       if (!result.success) {
@@ -624,14 +668,28 @@ async function executeStep(
 ): Promise<{ success: boolean; error?: string; value?: unknown; skipped?: boolean }> {
   try {
     // Check conditional — if the `if` field is present, evaluate it first
+    // http_request steps don't use CDP, so their `if` is evaluated as a simple JS expression
     if ("if" in step && step.if != null) {
-      const conditionResult = await client.evaluate(step.if);
-      if (!conditionResult) {
-        return { success: true, skipped: true };
+      if ("http_request" in step) {
+        // For http_request, evaluate the condition without CDP (simple truthy check)
+        // eslint-disable-next-line no-eval
+        const conditionResult = (() => { try { return !!eval(step.if); } catch { return false; } })();
+        if (!conditionResult) {
+          return { success: true, skipped: true };
+        }
+      } else {
+        const conditionResult = await client.evaluate(step.if);
+        if (!conditionResult) {
+          return { success: true, skipped: true };
+        }
       }
     }
 
     // Dispatch to appropriate handler based on step type
+    if ("http_request" in step) {
+      return await httpRequestStep(step as any, vars);
+    }
+
     if ("eval" in step) {
       return await evalStep(step, client, vars, isHook);
     }
@@ -1263,6 +1321,53 @@ async function switchFrameStep(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     await client.switchFrame(step.switch_frame?.selector);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Execute an http_request step
+ * Makes a server-side HTTP request using Node's fetch API
+ */
+async function httpRequestStep(
+  step: StepDef & { http_request: { url: string; method?: string; body?: unknown; headers?: Record<string, string>; as?: string } },
+  vars: Record<string, unknown>
+): Promise<{ success: boolean; error?: string; value?: unknown }> {
+  try {
+    const { url, method = "GET", body, headers, as: varName } = step.http_request;
+
+    const fetchOptions: RequestInit = {
+      method,
+      headers: { "Content-Type": "application/json", ...headers },
+    };
+
+    if (body != null && method !== "GET") {
+      fetchOptions.body = typeof body === "string" ? body : JSON.stringify(body);
+    }
+
+    const response = await fetch(url, fetchOptions);
+
+    if (!response.ok) {
+      return { success: false, error: `HTTP ${response.status}: ${response.statusText}` };
+    }
+
+    // Parse response — try JSON first, fall back to text
+    let responseBody: unknown;
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      responseBody = await response.json();
+    } else {
+      responseBody = await response.text();
+    }
+
+    if (varName) {
+      return { success: true, value: responseBody };
+    }
     return { success: true };
   } catch (error) {
     return {
