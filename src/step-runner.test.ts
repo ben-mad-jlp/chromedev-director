@@ -1797,8 +1797,8 @@ describe("step-runner", () => {
 
       const result = await runSteps(mockClient, testDef);
       expect(result.status).toBe("passed");
-      // over expression + 3 nested evals = 4 evaluate calls
-      expect(mockClient.evaluate).toHaveBeenCalledTimes(4);
+      // over expr + array injection + 3*(syncItem + syncIndex + eval) = 11 evaluate calls
+      expect(mockClient.evaluate).toHaveBeenCalledTimes(11);
     });
 
     it("over mode: nested steps store 'as' variables visible to later iterations", async () => {
@@ -1851,8 +1851,8 @@ describe("step-runner", () => {
 
       const result = await runSteps(mockClient, testDef);
       expect(result.status).toBe("passed");
-      // over expression + 2 nested evals = 3 evaluate calls
-      expect(mockClient.evaluate).toHaveBeenCalledTimes(3);
+      // over expr + array injection + 2*(syncItem + syncIndex + eval) = 8 evaluate calls
+      expect(mockClient.evaluate).toHaveBeenCalledTimes(8);
     });
 
     it("while mode: loops until condition is false", async () => {
@@ -1923,8 +1923,8 @@ describe("step-runner", () => {
 
       const result = await runSteps(mockClient, testDef);
       expect(result.status).toBe("passed");
-      // 3 while checks + 3 nested evals = 6 calls
-      expect(mockClient.evaluate).toHaveBeenCalledTimes(6);
+      // 3*(syncIndex + while check + eval) = 9 calls
+      expect(mockClient.evaluate).toHaveBeenCalledTimes(9);
     });
 
     it("error in nested step: reports iteration index and step label", async () => {
@@ -1977,8 +1977,8 @@ describe("step-runner", () => {
 
       const result = await runSteps(mockClient, testDef);
       expect(result.status).toBe("passed");
-      // Only the over expression is evaluated
-      expect(mockClient.evaluate).toHaveBeenCalledTimes(1);
+      // over expr + array injection (no iterations) = 2 evaluate calls
+      expect(mockClient.evaluate).toHaveBeenCalledTimes(2);
     });
 
     it("if conditional on loop step: skips entire loop", async () => {
@@ -2420,8 +2420,8 @@ describe("step-runner", () => {
 
         const result = await runSteps(mockClient, testDef);
         expect(result.status).toBe("passed");
-        // Verify the evaluate call includes "exact"
-        expect(mockClient.evaluate).toHaveBeenCalledWith(expect.stringContaining("exact"));
+        // Verify the evaluate call uses exact match (trim() ===)
+        expect(mockClient.evaluate).toHaveBeenCalledWith(expect.stringContaining(".trim() ==="));
       });
     });
 

@@ -50,26 +50,27 @@ export interface TestDef {
  */
 export type StepDef =
   /** Execute JS in the page. `as` stores the result in `$vars.NAME`. Returns objects auto-serialized. */
-  | { label?: string; if?: string; eval: string; as?: string }
+  | { label?: string; if?: string; capture_dom?: boolean; eval: string; as?: string }
   /** Fill an input field. Dispatches input+change events so React controlled components update. */
-  | { label?: string; if?: string; fill: { selector: string; value: string } }
+  | { label?: string; if?: string; capture_dom?: boolean; fill: { selector: string; value: string } }
   /** Click an element by CSS selector. */
-  | { label?: string; if?: string; click: { selector: string } }
+  | { label?: string; if?: string; capture_dom?: boolean; click: { selector: string } }
   /** Assert a JS expression is truthy. `retry` enables polling at interval until timeout. */
   | {
       label?: string;
       if?: string;
+      capture_dom?: boolean;
       assert: string;
       retry?: { interval: number; timeout: number };
     }
   /** Sleep for N milliseconds. Use after actions that trigger async renders (500-2000ms). */
-  | { label?: string; if?: string; wait: number }
+  | { label?: string; if?: string; capture_dom?: boolean; wait: number }
   /** Poll for element existence by CSS selector. */
-  | { label?: string; if?: string; wait_for: { selector: string; timeout?: number } }
+  | { label?: string; if?: string; capture_dom?: boolean; wait_for: { selector: string; timeout?: number } }
   /** Fail if console messages exist at given levels. Use `"warning"` not `"warn"` — CDP uses `"warning"`. */
-  | { label?: string; if?: string; console_check: ("error" | "warn" | "warning" | "info" | "log" | "debug")[] }
+  | { label?: string; if?: string; capture_dom?: boolean; console_check: ("error" | "warn" | "warning" | "info" | "log" | "debug")[] }
   /** Fail if any 4xx/5xx network responses were captured. */
-  | { label?: string; if?: string; network_check: boolean }
+  | { label?: string; if?: string; capture_dom?: boolean; network_check: boolean }
   /**
    * Intercept requests matching a glob pattern and return a mock response.
    * `match` uses glob: `*api/users*`. First matching rule wins — register specific patterns first.
@@ -79,6 +80,7 @@ export type StepDef =
   | {
       label?: string;
       if?: string;
+      capture_dom?: boolean;
       mock_network: {
         match: string;
         status: number;
@@ -87,29 +89,137 @@ export type StepDef =
       };
     }
   /** Execute another test by ID. Nested test's steps run inline; url/before/after/env are ignored. */
-  | { label?: string; if?: string; run_test: string }
+  | { label?: string; if?: string; capture_dom?: boolean; run_test: string }
   /** Capture a PNG screenshot. Optionally store base64 in `$vars.NAME` via `as`. */
-  | { label?: string; if?: string; screenshot: { as?: string } }
+  | { label?: string; if?: string; capture_dom?: boolean; screenshot: { as?: string } }
   /** Select an option in a native `<select>` dropdown. */
-  | { label?: string; if?: string; select: { selector: string; value: string } }
+  | { label?: string; if?: string; capture_dom?: boolean; select: { selector: string; value: string } }
   /** Dispatch a keyboard event. `key` uses DOM key names (Enter, Tab, Escape, ArrowDown, etc.). */
-  | { label?: string; if?: string; press_key: { key: string; modifiers?: ("ctrl" | "shift" | "alt" | "meta")[] } }
+  | { label?: string; if?: string; capture_dom?: boolean; press_key: { key: string; modifiers?: ("ctrl" | "shift" | "alt" | "meta")[] } }
   /** Hover over an element by CSS selector (dispatches mouseMoved). */
-  | { label?: string; if?: string; hover: { selector: string } }
+  | { label?: string; if?: string; capture_dom?: boolean; hover: { selector: string } }
   /** Switch execution context to an iframe (by selector) or back to main frame (omit selector). */
-  | { label?: string; if?: string; switch_frame: { selector?: string } }
+  | { label?: string; if?: string; capture_dom?: boolean; switch_frame: { selector?: string } }
   /** Configure auto-handling for future JS dialogs (alert/confirm/prompt). */
-  | { label?: string; if?: string; handle_dialog: { action: "accept" | "dismiss"; text?: string } }
+  | { label?: string; if?: string; capture_dom?: boolean; handle_dialog: { action: "accept" | "dismiss"; text?: string } }
   /** Make a server-side HTTP request (Node fetch). Useful for API setup/teardown in before hooks. */
   | {
       label?: string;
       if?: string;
+      capture_dom?: boolean;
       http_request: {
         url: string;
         method?: string;
         body?: unknown;
         headers?: Record<string, string>;
         as?: string;
+      };
+    }
+  /** Loop over an array or while a condition is true. */
+  | {
+      label?: string;
+      if?: string;
+      capture_dom?: boolean;
+      loop: {
+        over?: string;
+        while?: string;
+        as?: string;
+        index_as?: string;
+        max?: number;
+        steps: StepDef[];
+      };
+    }
+  /** Fill an input and press Enter (barcode scanner pattern). */
+  | { label?: string; if?: string; capture_dom?: boolean; scan_input: { selector: string; value: string } }
+  /** Fill multiple form fields in one step. */
+  | { label?: string; if?: string; capture_dom?: boolean; fill_form: { fields: Array<{ selector: string; value: string }> } }
+  /** Scroll element into view. */
+  | { label?: string; if?: string; capture_dom?: boolean; scroll_to: { selector: string } }
+  /** Clear an input with proper React event dispatching. */
+  | { label?: string; if?: string; capture_dom?: boolean; clear_input: { selector: string } }
+  /** Wait until text appears on page (polls at 200ms). `match`: "contains" (default), "exact", or "regex". */
+  | { label?: string; if?: string; capture_dom?: boolean; wait_for_text: { text: string; match?: "exact" | "contains" | "regex"; selector?: string; timeout?: number } }
+  /** Wait until text disappears from page (polls at 200ms). `match`: "contains" (default), "exact", or "regex". */
+  | { label?: string; if?: string; capture_dom?: boolean; wait_for_text_gone: { text: string; match?: "exact" | "contains" | "regex"; selector?: string; timeout?: number } }
+  /** Assert page contains (or doesn't contain) specific text. `match`: "contains" (default), "exact", or "regex". */
+  | {
+      label?: string;
+      if?: string;
+      capture_dom?: boolean;
+      assert_text: {
+        text: string;
+        absent?: boolean;
+        match?: "exact" | "contains" | "regex";
+        selector?: string;
+        retry?: { interval: number; timeout: number };
+      };
+    }
+  /** Click element by visible text content. `match`: "contains" (default), "exact", or "regex". */
+  | {
+      label?: string;
+      if?: string;
+      capture_dom?: boolean;
+      click_text: {
+        text: string;
+        match?: "exact" | "contains" | "regex";
+        selector?: string;
+      };
+    }
+  /** Click Nth element matching selector or text pattern. `match`: "contains" (default), "exact", or "regex". */
+  | {
+      label?: string;
+      if?: string;
+      capture_dom?: boolean;
+      click_nth: {
+        index: number;
+        text?: string;
+        selector?: string;
+        match?: "exact" | "contains" | "regex";
+      };
+    }
+  /** Type text character by character with delays (for autocomplete/debounced inputs). */
+  | {
+      label?: string;
+      if?: string;
+      capture_dom?: boolean;
+      type: {
+        selector: string;
+        text: string;
+        delay?: number;
+        clear?: boolean;
+      };
+    }
+  /** Open dropdown and select option by text. `match` controls text matching: "contains" (default), "exact", or "regex". */
+  | {
+      label?: string;
+      if?: string;
+      capture_dom?: boolean;
+      choose_dropdown: {
+        selector: string;
+        text: string;
+        match?: "exact" | "contains" | "regex";
+        timeout?: number;
+      };
+    }
+  /** Expand a collapsed navigation group by name. */
+  | { label?: string; if?: string; capture_dom?: boolean; expand_menu: { group: string } }
+  /** Toggle a checkbox or switch by its label text. */
+  | {
+      label?: string;
+      if?: string;
+      capture_dom?: boolean;
+      toggle: {
+        label: string;
+        state?: boolean;
+      };
+    }
+  /** Close current modal/overlay. */
+  | {
+      label?: string;
+      if?: string;
+      capture_dom?: boolean;
+      close_modal: {
+        strategy?: "button" | "escape" | "backdrop";
       };
     };
 
@@ -129,6 +239,8 @@ export type TestResult =
       failed_label?: string;
       step_definition: StepDef;
       error: string;
+      /** Breadcrumb trail for failures inside loops. Each entry is one nesting level, outermost first. */
+      loop_context?: Array<{ iteration: number; step: number; label: string }>;
       console_errors: string[];
       dom_snapshot?: string;
       screenshot?: string;

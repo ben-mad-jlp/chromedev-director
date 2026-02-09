@@ -23,12 +23,27 @@ const FailureDetail: React.FC<{ run: TestRun }> = ({ run }) => {
 
   return (
     <div className="space-y-3 pt-3 pb-1">
-      {/* Error message */}
+      {/* Error location + message */}
       <div className="bg-red-50 border border-red-200 rounded-lg p-4">
         <p className="text-xs font-semibold text-red-800 mb-1">
           Failed at step {result.failed_step + 1}
           {result.failed_label ? ` — ${result.failed_label}` : ''}
         </p>
+
+        {/* Loop context breadcrumb */}
+        {result.loop_context && result.loop_context.length > 0 && (
+          <div className="flex items-center gap-1 flex-wrap text-xs text-red-700 mb-2 font-mono">
+            {result.loop_context.map((ctx, i) => (
+              <React.Fragment key={i}>
+                {i > 0 && <span className="text-red-400">&rarr;</span>}
+                <span className="bg-red-100 rounded px-1.5 py-0.5">
+                  Iter {ctx.iteration}, Step {ctx.step + 1}{ctx.label ? `: ${ctx.label}` : ''}
+                </span>
+              </React.Fragment>
+            ))}
+          </div>
+        )}
+
         <pre className="text-xs text-red-700 font-mono whitespace-pre-wrap break-words">
           {result.error}
         </pre>

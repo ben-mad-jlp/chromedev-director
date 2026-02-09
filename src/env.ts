@@ -20,6 +20,38 @@ function stringifyValue(value: unknown): string {
 }
 
 /**
+ * Set of var keys that have been synced to window.__cdp_vars in the browser.
+ * When a key is in this set, $vars.KEY interpolation in eval expressions
+ * emits `window.__cdp_vars.KEY` instead of inlining the JSON — keeping
+ * expressions small and avoiding "Object reference chain is too long" errors
+ * in nested loops.
+ */
+const browserSyncedVars = new Set<string>();
+
+/**
+ * Mark a var key as synced to the browser's window.__cdp_vars.
+ * Called by loopStep after injecting values into the page.
+ */
+export function markVarSynced(key: string): void {
+  browserSyncedVars.add(key);
+}
+
+/**
+ * Remove a var key from the browser-synced set.
+ * Called when a loop finishes to clean up.
+ */
+export function unmarkVarSynced(key: string): void {
+  browserSyncedVars.delete(key);
+}
+
+/**
+ * Check if a var key is synced to the browser.
+ */
+export function isVarSynced(key: string): boolean {
+  return browserSyncedVars.has(key);
+}
+
+/**
  * Interpolates $env.KEY and $vars.KEY patterns in a template string
  *
  * @param template - The template string containing patterns to replace
@@ -57,6 +89,12 @@ export function interpolate(
   // Replace $vars.KEY patterns (runs after $env to allow env vars in vars)
   result = result.replace(/\$vars\.([a-zA-Z_][a-zA-Z0-9_]*)/g, (match, key) => {
     if (key in vars) {
+      // For vars synced to the browser (loop variables with complex values),
+      // emit a window.__cdp_vars reference instead of inlining the JSON.
+      // This prevents eval expressions from growing exponentially in nested loops.
+      if (browserSyncedVars.has(key)) {
+        return `window.__cdp_vars[${JSON.stringify(key)}]`;
+      }
       return stringifyValue(vars[key]);
     }
     return match;
@@ -354,6 +392,7 @@ export function interpolateStep(
       ...common,
       wait_for_text: {
         text: interpolate(step.wait_for_text.text, env, vars),
+        ...(step.wait_for_text.match != null ? { match: step.wait_for_text.match } : {}),
         ...(step.wait_for_text.selector != null
           ? { selector: interpolate(step.wait_for_text.selector, env, vars) }
           : {}),
@@ -368,6 +407,7 @@ export function interpolateStep(
       ...common,
       wait_for_text_gone: {
         text: interpolate(step.wait_for_text_gone.text, env, vars),
+        ...(step.wait_for_text_gone.match != null ? { match: step.wait_for_text_gone.match } : {}),
         ...(step.wait_for_text_gone.selector != null
           ? { selector: interpolate(step.wait_for_text_gone.selector, env, vars) }
           : {}),
@@ -382,6 +422,7 @@ export function interpolateStep(
       ...common,
       assert_text: {
         text: interpolate(step.assert_text.text, env, vars),
+        ...(step.assert_text.match != null ? { match: step.assert_text.match } : {}),
         ...(step.assert_text.absent != null ? { absent: step.assert_text.absent } : {}),
         ...(step.assert_text.selector != null
           ? { selector: interpolate(step.assert_text.selector, env, vars) }
@@ -442,6 +483,7 @@ export function interpolateStep(
       choose_dropdown: {
         selector: interpolate(step.choose_dropdown.selector, env, vars),
         text: interpolate(step.choose_dropdown.text, env, vars),
+        ...(step.choose_dropdown.match != null ? { match: step.choose_dropdown.match } : {}),
         ...(step.choose_dropdown.timeout != null ? { timeout: step.choose_dropdown.timeout } : {}),
       },
     };

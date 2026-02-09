@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Search, FolderOpen } from 'lucide-react';
+import { Search, FolderOpen, RefreshCw } from 'lucide-react';
 import { useUIStore } from '@/stores/ui-store';
 import { useTestStore } from '@/stores/test-store';
 import TestList from '@/features/tests/TestList';
@@ -37,8 +37,8 @@ export const Sidebar: React.FC = () => {
     <div className="w-full h-full flex flex-col bg-white">
       {/* Header */}
       <div className="p-4 border-b border-gray-200 flex-shrink-0">
-        {/* Search input */}
-        <div className="relative">
+        {/* Search + Refresh */}
+        <div className="relative flex items-center gap-2">
           <Search
             size={16}
             className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
@@ -50,6 +50,13 @@ export const Sidebar: React.FC = () => {
             onChange={handleSearchChange}
             className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-md bg-gray-50 text-sm placeholder-gray-500 focus:bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-colors"
           />
+          <button
+            onClick={() => fetchTests()}
+            className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors flex-shrink-0"
+            title="Refresh tests from disk"
+          >
+            <RefreshCw size={16} />
+          </button>
         </div>
       </div>
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { AlertCircle, Loader2, Trash2 } from 'lucide-react';
+import { AlertCircle, Loader2, Trash2, RefreshCw } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { RunButton, type RunButtonState } from '@/features/runs/RunButton';
 import LogPanel from '@/features/runs/LogPanel';
@@ -86,43 +86,42 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
   const [descriptionValue, setDescriptionValue] = useState('');
   const descriptionInputRef = useRef<HTMLInputElement>(null);
 
-  // Fetch test on mount or when testId changes
-  useEffect(() => {
-    if (initialTest) {
-      // Use provided test
-      setTest(initialTest);
-      setIsLoading(false);
-      setError(null);
-      return;
-    }
-
+  // Reusable fetch function — called on mount and by refresh button
+  const fetchTest = async () => {
     if (!testId) {
       setError('No test ID provided');
       setIsLoading(false);
       return;
     }
+    setIsLoading(true);
+    setError(null);
+    try {
+      const fetchedTest = await api.getTest(testId);
+      setTest(fetchedTest);
+    } catch (err) {
+      const message =
+        err instanceof api.ApiError
+          ? err.status === 404
+            ? `Test "${testId}" not found`
+            : `Failed to load test (HTTP ${err.status})`
+          : err instanceof Error
+            ? err.message
+            : 'Unknown error loading test';
+      setError(message);
+      setTest(null);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-    const fetchTest = async () => {
-      setIsLoading(true);
+  // Fetch test on mount or when testId changes
+  useEffect(() => {
+    if (initialTest) {
+      setTest(initialTest);
+      setIsLoading(false);
       setError(null);
-      try {
-        const fetchedTest = await api.getTest(testId);
-        setTest(fetchedTest);
-      } catch (err) {
-        const message =
-          err instanceof api.ApiError
-            ? err.status === 404
-              ? `Test "${testId}" not found`
-              : `Failed to load test (HTTP ${err.status})`
-            : err instanceof Error
-              ? err.message
-              : 'Unknown error loading test';
-        setError(message);
-        setTest(null);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+      return;
+    }
 
     fetchTest();
   }, [testId, initialTest]);
@@ -343,6 +342,12 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
                 {test.name}
               </h1>
             )}
+            <div className="flex items-center gap-3 mt-0.5">
+              <span className="text-xs text-gray-500 font-mono">{test.id}</span>
+              <span className="text-xs text-gray-500" title={new Date(test.updatedAt).toLocaleString()}>
+                Updated {new Date(test.updatedAt).toLocaleString()}
+              </span>
+            </div>
 
             {/* Editable description */}
             {editingDescription ? (
@@ -373,8 +378,15 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
             </p>
           </div>
 
-          {/* Delete + Run buttons */}
+          {/* Refresh + Delete + Run buttons */}
           <div className="flex-shrink-0 flex items-center gap-2">
+            <button
+              onClick={fetchTest}
+              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+              title="Refresh test from disk"
+            >
+              <RefreshCw className="w-5 h-5" />
+            </button>
             <button
               onClick={() => setShowDeleteDialog(true)}
               className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"

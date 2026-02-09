@@ -7,6 +7,21 @@ export interface TestListItemProps {
   isSelected: boolean;
 }
 
+function formatRelativeTime(isoString: string): string {
+  const date = new Date(isoString);
+  const now = Date.now();
+  const diffMs = now - date.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return 'just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDays = Math.floor(diffHr / 24);
+  if (diffDays < 30) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
+}
+
 /**
  * TestListItem component
  * Displays a single test in the sidebar list with name, status icon, and step count
@@ -33,7 +48,13 @@ export const TestListItem: React.FC<TestListItemProps> = ({
       }`}
     >
       <div className="min-w-0">
-        <h3 className="font-medium text-sm truncate">{test.name}</h3>
+        <div className="flex items-baseline justify-between gap-2">
+          <h3 className="font-medium text-sm truncate">{test.name}</h3>
+          <span className="text-xs text-gray-500 flex-shrink-0" title={new Date(test.updatedAt).toLocaleString()}>
+            {formatRelativeTime(test.updatedAt)}
+          </span>
+        </div>
+        <p className="text-xs text-gray-500 font-mono truncate">{test.id}</p>
         {test.description && (
           <p className="text-xs text-gray-500 truncate">
             {test.description}

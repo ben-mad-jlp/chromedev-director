@@ -38,9 +38,11 @@ export const TestList: React.FC<TestListProps> = ({
   selectedTestId,
   searchQuery,
 }) => {
-  // Filter tests based on search query
+  // Filter and sort tests (newest updated first)
   const filteredTests = useMemo(
-    () => filterTests(tests, searchQuery),
+    () => filterTests(tests, searchQuery).sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    ),
     [tests, searchQuery]
   );
 

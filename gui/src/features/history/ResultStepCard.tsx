@@ -1,32 +1,6 @@
 import React, { useState } from 'react';
 import { ChevronDown, CheckCircle, XCircle } from 'lucide-react';
-
-/**
- * Step definition - matches server-side StepDef
- */
-export type StepDef =
-  | { label?: string; eval: string; as?: string }
-  | { label?: string; fill: { selector: string; value: string } }
-  | { label?: string; click: { selector: string } }
-  | {
-      label?: string;
-      assert: string;
-      retry?: { interval: number; timeout: number };
-    }
-  | { label?: string; wait: number }
-  | { label?: string; wait_for: { selector: string; timeout?: number } }
-  | { label?: string; console_check: ('error' | 'warn' | 'warning' | 'info' | 'log' | 'debug')[] }
-  | { label?: string; network_check: boolean }
-  | {
-      label?: string;
-      mock_network: {
-        match: string;
-        status: number;
-        body?: unknown;
-        delay?: number;
-      };
-    }
-  | { label?: string; run_test: string };
+import type { StepDef } from '@/lib/types';
 
 /**
  * Step result - outcome of a single step execution
@@ -83,6 +57,74 @@ function getStepDescription(step: StepDef): string {
   }
   if ('run_test' in step) {
     return `Run test: ${step.run_test}`;
+  }
+  if ('screenshot' in step) {
+    return step.screenshot.as ? `Screenshot → $vars.${step.screenshot.as}` : 'Screenshot';
+  }
+  if ('select' in step) {
+    return `Select "${step.select.value}" in "${step.select.selector}"`;
+  }
+  if ('press_key' in step) {
+    const mods = step.press_key.modifiers?.join('+');
+    return mods ? `Press ${mods}+${step.press_key.key}` : `Press ${step.press_key.key}`;
+  }
+  if ('hover' in step) {
+    return `Hover "${step.hover.selector}"`;
+  }
+  if ('switch_frame' in step) {
+    return step.switch_frame.selector ? `Switch to "${step.switch_frame.selector}"` : 'Switch to main frame';
+  }
+  if ('handle_dialog' in step) {
+    return `Dialog: ${step.handle_dialog.action}`;
+  }
+  if ('http_request' in step) {
+    const method = step.http_request.method || 'GET';
+    return `${method} ${step.http_request.url}`;
+  }
+  if ('loop' in step) {
+    return 'Loop';
+  }
+  if ('scan_input' in step) {
+    return `Scan "${step.scan_input.selector}"`;
+  }
+  if ('fill_form' in step) {
+    return `Fill form (${step.fill_form.fields.length} fields)`;
+  }
+  if ('scroll_to' in step) {
+    return `Scroll to "${step.scroll_to.selector}"`;
+  }
+  if ('clear_input' in step) {
+    return `Clear "${step.clear_input.selector}"`;
+  }
+  if ('wait_for_text' in step) {
+    return `Wait for text "${step.wait_for_text.text}"`;
+  }
+  if ('wait_for_text_gone' in step) {
+    return `Wait for text gone "${step.wait_for_text_gone.text}"`;
+  }
+  if ('assert_text' in step) {
+    return `Assert text: "${step.assert_text.text}"`;
+  }
+  if ('click_text' in step) {
+    return `Click text "${step.click_text.text}"`;
+  }
+  if ('click_nth' in step) {
+    return `Click #${step.click_nth.index}`;
+  }
+  if ('type' in step) {
+    return `Type "${step.type.text}" into "${step.type.selector}"`;
+  }
+  if ('choose_dropdown' in step) {
+    return `Choose "${step.choose_dropdown.text}"`;
+  }
+  if ('expand_menu' in step) {
+    return `Expand menu "${step.expand_menu.group}"`;
+  }
+  if ('toggle' in step) {
+    return `Toggle "${step.toggle.label}"`;
+  }
+  if ('close_modal' in step) {
+    return 'Close modal';
   }
 
   return 'Unknown step';

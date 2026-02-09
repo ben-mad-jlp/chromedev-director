@@ -149,11 +149,11 @@ export type StepDef =
   | { label?: string; if?: string; capture_dom?: boolean; scroll_to: { selector: string } }
   /** Clear an input with proper React event dispatching. */
   | { label?: string; if?: string; capture_dom?: boolean; clear_input: { selector: string } }
-  /** Wait until text appears on page (polls at 200ms). */
-  | { label?: string; if?: string; capture_dom?: boolean; wait_for_text: { text: string; selector?: string; timeout?: number } }
-  /** Wait until text disappears from page (polls at 200ms). */
-  | { label?: string; if?: string; capture_dom?: boolean; wait_for_text_gone: { text: string; selector?: string; timeout?: number } }
-  /** Assert page contains (or doesn't contain) specific text. */
+  /** Wait until text appears on page (polls at 200ms). `match`: "contains" (default), "exact", or "regex". */
+  | { label?: string; if?: string; capture_dom?: boolean; wait_for_text: { text: string; match?: "exact" | "contains" | "regex"; selector?: string; timeout?: number } }
+  /** Wait until text disappears from page (polls at 200ms). `match`: "contains" (default), "exact", or "regex". */
+  | { label?: string; if?: string; capture_dom?: boolean; wait_for_text_gone: { text: string; match?: "exact" | "contains" | "regex"; selector?: string; timeout?: number } }
+  /** Assert page contains (or doesn't contain) specific text. `match`: "contains" (default), "exact", or "regex". */
   | {
       label?: string;
       if?: string;
@@ -161,22 +161,23 @@ export type StepDef =
       assert_text: {
         text: string;
         absent?: boolean;
+        match?: "exact" | "contains" | "regex";
         selector?: string;
         retry?: { interval: number; timeout: number };
       };
     }
-  /** Click element by visible text content. */
+  /** Click element by visible text content. `match`: "contains" (default), "exact", or "regex". */
   | {
       label?: string;
       if?: string;
       capture_dom?: boolean;
       click_text: {
         text: string;
-        match?: "exact" | "contains";
+        match?: "exact" | "contains" | "regex";
         selector?: string;
       };
     }
-  /** Click Nth element matching selector or text pattern. */
+  /** Click Nth element matching selector or text pattern. `match`: "contains" (default), "exact", or "regex". */
   | {
       label?: string;
       if?: string;
@@ -185,7 +186,7 @@ export type StepDef =
         index: number;
         text?: string;
         selector?: string;
-        match?: "exact" | "contains";
+        match?: "exact" | "contains" | "regex";
       };
     }
   /** Type text character by character with delays (for autocomplete/debounced inputs). */
@@ -200,7 +201,7 @@ export type StepDef =
         clear?: boolean;
       };
     }
-  /** Open dropdown and select option by text. */
+  /** Open dropdown and select option by text. `match` controls text matching: "contains" (default), "exact", or "regex". */
   | {
       label?: string;
       if?: string;
@@ -208,6 +209,7 @@ export type StepDef =
       choose_dropdown: {
         selector: string;
         text: string;
+        match?: "exact" | "contains" | "regex";
         timeout?: number;
       };
     }
@@ -252,6 +254,8 @@ export type TestResult =
       failed_label?: string;
       step_definition: StepDef;
       error: string;
+      /** Breadcrumb trail for failures inside loops. Each entry is one nesting level, outermost first. */
+      loop_context?: Array<{ iteration: number; step: number; label: string }>;
       console_errors: string[];
       dom_snapshot?: string;
       screenshot?: string;
