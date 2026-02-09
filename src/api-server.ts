@@ -474,7 +474,7 @@ export function createApiServer(options: GuiOptions): { app: Hono; injectWebSock
   app.post('/api/suites/run', async (c: any) => {
     try {
       const body = await c.req.json() as any;
-      const { tag, testIds, stopOnFailure } = body;
+      const { tag, testIds, stopOnFailure, concurrency } = body;
 
       // Validate inputs
       if (!tag && (!testIds || !Array.isArray(testIds) || testIds.length === 0)) {
@@ -502,6 +502,7 @@ export function createApiServer(options: GuiOptions): { app: Hono; injectWebSock
           stopOnFailure: stopOnFailure ?? false,
           storageDir: config.storageDir,
           projectRoot: config.projectRoot,
+          concurrency: Math.min(Math.max(concurrency ?? 3, 1), 10),
         }, onSuiteEvent);
 
         return c.json({ result }, 200);

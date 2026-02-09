@@ -151,6 +151,94 @@ describe("CDPClient event emission", () => {
   });
 });
 
+describe("CDPClient createTab option", () => {
+  it("should accept createTab option in constructor", () => {
+    const client = new CDPClient(9222, undefined, { createTab: true });
+    expect(client).toBeDefined();
+    expect((client as any).createTab).toBe(true);
+  });
+
+  it("should default createTab to false", () => {
+    const client = new CDPClient(9222);
+    expect((client as any).createTab).toBe(false);
+  });
+
+  it("should default createTab to false when options object is empty", () => {
+    const client = new CDPClient(9222, undefined, {});
+    expect((client as any).createTab).toBe(false);
+  });
+
+  it("should not have ownedTargetId initially", () => {
+    const client = new CDPClient(9222, undefined, { createTab: true });
+    expect((client as any).ownedTargetId).toBeUndefined();
+  });
+
+  it("should close owned tab during close()", async () => {
+    const client = new CDPClient(9222, undefined, { createTab: true });
+
+    const mockCloseTarget = vi.fn().mockResolvedValue(undefined);
+
+    // Set up mock internal state to simulate a connected client with an owned tab
+    (client as any).client = {
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    (client as any).connected = true;
+    (client as any).ownedTargetId = "target-123";
+    (client as any).domains = {
+      Target: {
+        closeTarget: mockCloseTarget,
+      },
+    };
+
+    await client.close();
+
+    // Should have called closeTarget with the owned target ID
+    expect(mockCloseTarget).toHaveBeenCalledWith({ targetId: "target-123" });
+    // Should have cleared ownedTargetId
+    expect((client as any).ownedTargetId).toBeUndefined();
+  });
+
+  it("should not call closeTarget if no owned tab", async () => {
+    const client = new CDPClient(9222);
+
+    const mockCloseTarget = vi.fn();
+
+    (client as any).client = {
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    (client as any).connected = true;
+    (client as any).domains = {
+      Target: {
+        closeTarget: mockCloseTarget,
+      },
+    };
+
+    await client.close();
+
+    // Should NOT have called closeTarget
+    expect(mockCloseTarget).not.toHaveBeenCalled();
+  });
+
+  it("should handle closeTarget errors gracefully during close()", async () => {
+    const client = new CDPClient(9222, undefined, { createTab: true });
+
+    (client as any).client = {
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    (client as any).connected = true;
+    (client as any).ownedTargetId = "target-456";
+    (client as any).domains = {
+      Target: {
+        closeTarget: vi.fn().mockRejectedValue(new Error("Tab already closed")),
+      },
+    };
+
+    // Should not throw even if closeTarget fails
+    await expect(client.close()).resolves.not.toThrow();
+    expect((client as any).ownedTargetId).toBeUndefined();
+  });
+});
+
 describe("CDPClient event forwarding", () => {
   it("forwards console events with correct structure", () => {
     const events: RunEvent[] = [];

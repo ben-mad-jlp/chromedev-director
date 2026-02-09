@@ -214,3 +214,240 @@ describe("suite-runner", () => {
     expect(result.passed).toBe(1);
   });
 });
+
+describe("suite-runner concurrency", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("runs multiple tests concurrently with concurrency > 1", async () => {
+    const mockTests = [
+      { id: "test-1", name: "Test 1", definition: { url: "http://localhost", steps: [] } },
+      { id: "test-2", name: "Test 2", definition: { url: "http://localhost", steps: [] } },
+      { id: "test-3", name: "Test 3", definition: { url: "http://localhost", steps: [] } },
+    ];
+
+    // Track concurrency: record when tests start/end
+    const runningCount = { current: 0, max: 0 };
+
+    // getTest: first 3 calls for list resolution, next 3 for running
+    (storage.getTest as any)
+      .mockResolvedValueOnce(mockTests[0])
+      .mockResolvedValueOnce(mockTests[1])
+      .mockResolvedValueOnce(mockTests[2])
+      .mockResolvedValueOnce(mockTests[0])
+      .mockResolvedValueOnce(mockTests[1])
+      .mockResolvedValueOnce(mockTests[2]);
+
+    (runTest as any).mockImplementation(async () => {
+      runningCount.current++;
+      if (runningCount.current > runningCount.max) {
+        runningCount.max = runningCount.current;
+      }
+      // Simulate some async work
+      await new Promise(r => setTimeout(r, 10));
+      runningCount.current--;
+      return { status: "passed", steps_completed: 1, duration_ms: 10, console_log: [], network_log: [] };
+    });
+
+    (storage.saveRun as any).mockResolvedValue({ id: "run-x" });
+
+    const result = await runSuite({
+      testIds: ["test-1", "test-2", "test-3"],
+      storageDir: "/tmp/test",
+      concurrency: 3,
+    });
+
+    expect(result.status).toBe("passed");
+    expect(result.total).toBe(3);
+    expect(result.passed).toBe(3);
+    // With concurrency 3 and 3 tests, all should run in parallel
+    expect(runningCount.max).toBeGreaterThan(1);
+  });
+
+  it("passes createTab=true when concurrency > 1", async () => {
+    const mockTest = { id: "test-1", name: "Test 1", definition: { url: "http://localhost", steps: [] } };
+
+    (storage.getTest as any)
+      .mockResolvedValueOnce(mockTest) // resolve list
+      .mockResolvedValueOnce(mockTest); // run test
+
+    (runTest as any).mockResolvedValueOnce({
+      status: "passed", steps_completed: 1, duration_ms: 10, console_log: [], network_log: [],
+    });
+
+    (storage.saveRun as any).mockResolvedValue({ id: "run-x" });
+
+    await runSuite({
+      testIds: ["test-1"],
+      storageDir: "/tmp/test",
+      concurrency: 2,
+    });
+
+    // runTest should be called with createTab=true (6th argument)
+    expect(runTest).toHaveBeenCalledTimes(1);
+    const call = (runTest as any).mock.calls[0];
+    expect(call[5]).toBe(true); // createTab param
+  });
+
+  it("does not pass createTab when concurrency is 1", async () => {
+    const mockTest = { id: "test-1", name: "Test 1", definition: { url: "http://localhost", steps: [] } };
+
+    (storage.getTest as any)
+      .mockResolvedValueOnce(mockTest) // resolve list
+      .mockResolvedValueOnce(mockTest); // run test
+
+    (runTest as any).mockResolvedValueOnce({
+      status: "passed", steps_completed: 1, duration_ms: 10, console_log: [], network_log: [],
+    });
+
+    (storage.saveRun as any).mockResolvedValue({ id: "run-x" });
+
+    await runSuite({
+      testIds: ["test-1"],
+      storageDir: "/tmp/test",
+      concurrency: 1,
+    });
+
+    expect(runTest).toHaveBeenCalledTimes(1);
+    const call = (runTest as any).mock.calls[0];
+    expect(call[5]).toBe(false); // createTab param should be false
+  });
+
+  it("preserves result ordering regardless of completion order", async () => {
+    const mockTests = [
+      { id: "test-1", name: "Test 1", definition: { url: "http://localhost", steps: [] } },
+      { id: "test-2", name: "Test 2", definition: { url: "http://localhost", steps: [] } },
+      { id: "test-3", name: "Test 3", definition: { url: "http://localhost", steps: [] } },
+    ];
+
+    (storage.getTest as any)
+      .mockResolvedValueOnce(mockTests[0])
+      .mockResolvedValueOnce(mockTests[1])
+      .mockResolvedValueOnce(mockTests[2])
+      .mockResolvedValueOnce(mockTests[0])
+      .mockResolvedValueOnce(mockTests[1])
+      .mockResolvedValueOnce(mockTests[2]);
+
+    // Make tests complete in reverse order
+    let callCount = 0;
+    (runTest as any).mockImplementation(async () => {
+      const delay = [30, 20, 10][callCount++] ?? 10;
+      await new Promise(r => setTimeout(r, delay));
+      return { status: "passed", steps_completed: 1, duration_ms: delay, console_log: [], network_log: [] };
+    });
+
+    (storage.saveRun as any).mockResolvedValue({ id: "run-x" });
+
+    const result = await runSuite({
+      testIds: ["test-1", "test-2", "test-3"],
+      storageDir: "/tmp/test",
+      concurrency: 3,
+    });
+
+    // Results should be in original order despite different completion times
+    expect(result.results[0].testId).toBe("test-1");
+    expect(result.results[1].testId).toBe("test-2");
+    expect(result.results[2].testId).toBe("test-3");
+  });
+
+  it("respects semaphore limit", async () => {
+    const mockTests = [
+      { id: "test-1", name: "Test 1", definition: { url: "http://localhost", steps: [] } },
+      { id: "test-2", name: "Test 2", definition: { url: "http://localhost", steps: [] } },
+      { id: "test-3", name: "Test 3", definition: { url: "http://localhost", steps: [] } },
+      { id: "test-4", name: "Test 4", definition: { url: "http://localhost", steps: [] } },
+    ];
+
+    const runningCount = { current: 0, max: 0 };
+
+    // getTest: 4 for list + 4 for run
+    (storage.getTest as any).mockImplementation(async (_dir: string, id: string) => {
+      return mockTests.find(t => t.id === id) ?? null;
+    });
+
+    (runTest as any).mockImplementation(async () => {
+      runningCount.current++;
+      if (runningCount.current > runningCount.max) {
+        runningCount.max = runningCount.current;
+      }
+      await new Promise(r => setTimeout(r, 20));
+      runningCount.current--;
+      return { status: "passed", steps_completed: 1, duration_ms: 20, console_log: [], network_log: [] };
+    });
+
+    (storage.saveRun as any).mockResolvedValue({ id: "run-x" });
+
+    const result = await runSuite({
+      testIds: ["test-1", "test-2", "test-3", "test-4"],
+      storageDir: "/tmp/test",
+      concurrency: 2,
+    });
+
+    expect(result.passed).toBe(4);
+    // Max concurrent should not exceed 2
+    expect(runningCount.max).toBeLessThanOrEqual(2);
+  });
+
+  it("stopOnFailure with concurrency skips pending tests", async () => {
+    const mockTests = [
+      { id: "test-1", name: "Test 1", definition: { url: "http://localhost", steps: [] } },
+      { id: "test-2", name: "Test 2", definition: { url: "http://localhost", steps: [] } },
+      { id: "test-3", name: "Test 3", definition: { url: "http://localhost", steps: [] } },
+    ];
+
+    (storage.getTest as any).mockImplementation(async (_dir: string, id: string) => {
+      return mockTests.find(t => t.id === id) ?? null;
+    });
+
+    let callIndex = 0;
+    (runTest as any).mockImplementation(async () => {
+      const idx = callIndex++;
+      if (idx === 0) {
+        // First test fails immediately
+        return { status: "failed", failed_step: 0, error: "fail", console_errors: [], duration_ms: 5, console_log: [], network_log: [] };
+      }
+      // Other tests take longer
+      await new Promise(r => setTimeout(r, 50));
+      return { status: "passed", steps_completed: 1, duration_ms: 50, console_log: [], network_log: [] };
+    });
+
+    (storage.saveRun as any).mockResolvedValue({ id: "run-x" });
+
+    const result = await runSuite({
+      testIds: ["test-1", "test-2", "test-3"],
+      storageDir: "/tmp/test",
+      stopOnFailure: true,
+      concurrency: 1, // sequential to ensure predictable ordering
+    });
+
+    expect(result.failed).toBe(1);
+    expect(result.skipped).toBeGreaterThanOrEqual(1);
+    expect(result.results[0].status).toBe("failed");
+  });
+
+  it("defaults to concurrency 1 (sequential) when not specified", async () => {
+    const mockTest = { id: "test-1", name: "Test 1", definition: { url: "http://localhost", steps: [] } };
+
+    (storage.getTest as any)
+      .mockResolvedValueOnce(mockTest)
+      .mockResolvedValueOnce(mockTest);
+
+    (runTest as any).mockResolvedValueOnce({
+      status: "passed", steps_completed: 1, duration_ms: 10, console_log: [], network_log: [],
+    });
+
+    (storage.saveRun as any).mockResolvedValue({ id: "run-x" });
+
+    const result = await runSuite({
+      testIds: ["test-1"],
+      storageDir: "/tmp/test",
+      // no concurrency specified
+    });
+
+    expect(result.passed).toBe(1);
+    // createTab should be false when concurrency is 1
+    const call = (runTest as any).mock.calls[0];
+    expect(call[5]).toBe(false);
+  });
+});

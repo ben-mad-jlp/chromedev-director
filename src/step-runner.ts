@@ -4,7 +4,7 @@
  */
 
 import { TestDef, StepDef, TestResult, CDPClient as CDPClientInterface, OnEvent, RunEvent, VerifyPageDef } from "./types.js";
-import { interpolate, interpolateStep } from "./env.js";
+import { interpolate, interpolateStep, markVarSynced, unmarkVarSynced } from "./env.js";
 import { CDPClient } from "./cdp-client.js";
 import { getTest } from "./storage.js";
 
@@ -133,8 +133,8 @@ function getStepType(step: StepDef): string {
  * @param projectRoot - Project root for resolving nested test IDs (default: process.cwd())
  * @returns The test result with execution status, errors, and diagnostics
  */
-export async function runTest(testDef: TestDef, port: number = 9222, onEvent?: OnEvent, projectRoot: string = process.cwd(), initialVars?: Record<string, unknown>): Promise<TestResult> {
-  const client = new CDPClient(port);
+export async function runTest(testDef: TestDef, port: number = 9222, onEvent?: OnEvent, projectRoot: string = process.cwd(), initialVars?: Record<string, unknown>, createTab?: boolean): Promise<TestResult> {
+  const client = new CDPClient(port, undefined, { createTab: createTab ?? false });
   const vars: Record<string, unknown> = { ...initialVars };
   const startTime = Date.now();
   const testTimeout = testDef.timeout ?? 30000;
@@ -410,6 +410,7 @@ async function runTestInner(
         failed_label: step.label,
         step_definition: step,
         error: result.error || "Unknown error",
+        ...(result.loop_context ? { loop_context: result.loop_context } : {}),
         console_errors: consoleMessages.map(m => m.text),
         dom_snapshot: await client.getDomSnapshot(),
         duration_ms: Date.now() - startTime,
@@ -629,6 +630,7 @@ export async function runSteps(
           failed_label: label,
           step_definition: step,
           error: result.error || "Unknown error",
+          ...(result.loop_context ? { loop_context: result.loop_context } : {}),
           ...diagnostics,
           duration_ms: duration2,
         };
@@ -847,7 +849,7 @@ async function executeStep(
   projectRoot: string = process.cwd(),
   context: RunContext = { visitedTests: new Set() },
   isHook: boolean = false
-): Promise<{ success: boolean; error?: string; value?: unknown; skipped?: boolean }> {
+): Promise<{ success: boolean; error?: string; value?: unknown; skipped?: boolean; loop_context?: Array<{ iteration: number; step: number; label: string }> }> {
   try {
     // Check conditional — if the `if` field is present, evaluate it first
     // http_request steps don't use CDP, so their `if` is evaluated as a simple JS expression
@@ -860,7 +862,7 @@ async function executeStep(
           return { success: true, skipped: true };
         }
       } else {
-        const conditionResult = await client.evaluate(step.if);
+        const conditionResult = await client.evaluate(`!!(${step.if})`);
         if (!conditionResult) {
           return { success: true, skipped: true };
         }
@@ -1428,7 +1430,7 @@ async function loopStep(
   onEvent: OnEvent | undefined,
   projectRoot: string,
   context: RunContext
-): Promise<{ success: boolean; error?: string; value?: unknown }> {
+): Promise<{ success: boolean; error?: string; value?: unknown; loop_context?: Array<{ iteration: number; step: number; label: string }> }> {
   try {
     const loop = step.loop;
     if (!loop || !Array.isArray(loop.steps)) {
@@ -1438,6 +1440,16 @@ async function loopStep(
     const asName = loop.as ?? "item";
     const indexAs = loop.index_as ?? "index";
 
+    // Helper: sync a loop variable to both vars and browser's window.__cdp_vars
+    const syncLoopVar = async (key: string, value: unknown) => {
+      vars[key] = value;
+      await client.evaluate(`(function() {
+        window.__cdp_vars = window.__cdp_vars || {};
+        window.__cdp_vars[${JSON.stringify(key)}] = ${JSON.stringify(value)};
+      })()`);
+      markVarSynced(key);
+    };
+
     if (loop.over != null) {
       // --- over mode: iterate over an array ---
       const items = await client.evaluate(loop.over);
@@ -1445,93 +1457,118 @@ async function loopStep(
         return { success: false, error: `loop.over expression must return an array, got ${typeof items}` };
       }
 
+      // Inject full array into browser once so inner `loop.over` expressions can reference it
+      await client.evaluate(`(function() {
+        window.__cdp_vars = window.__cdp_vars || {};
+        window.__cdp_vars[${JSON.stringify(asName + "__array")}] = ${JSON.stringify(items)};
+      })()`);
+
       const maxIterations = loop.max != null ? Math.min(loop.max, items.length) : items.length;
 
-      for (let i = 0; i < maxIterations; i++) {
-        vars[asName] = items[i];
-        vars[indexAs] = i;
+      try {
+        for (let i = 0; i < maxIterations; i++) {
+          await syncLoopVar(asName, items[i]);
+          await syncLoopVar(indexAs, i);
 
-        for (let s = 0; s < loop.steps.length; s++) {
-          const nestedStep = loop.steps[s];
-          const interpolatedStep = interpolateStep(nestedStep, {}, vars);
-          const label = interpolatedStep.label || `Step ${s + 1}`;
+          for (let s = 0; s < loop.steps.length; s++) {
+            const nestedStep = loop.steps[s];
+            const interpolatedStep = interpolateStep(nestedStep, {}, vars);
+            const label = interpolatedStep.label || `Step ${s + 1}`;
 
-          emit(onEvent, { type: "step:start", stepIndex: s, label: `Loop iteration ${i}, ${label}`, nested: null });
-          const stepStart = Date.now();
+            emit(onEvent, { type: "step:start", stepIndex: s, label: `Loop iteration ${i}, ${label}`, nested: null });
+            const stepStart = Date.now();
 
-          const result = await executeStep(interpolatedStep, client, vars, onEvent, projectRoot, context);
+            const result = await executeStep(interpolatedStep, client, vars, onEvent, projectRoot, context);
 
-          // Store variable if step has 'as' field
-          if ("as" in interpolatedStep && interpolatedStep.as && "value" in result && result.success && !result.skipped) {
-            vars[interpolatedStep.as] = result.value;
+            // Store variable if step has 'as' field
+            if ("as" in interpolatedStep && interpolatedStep.as && "value" in result && result.success && !result.skipped) {
+              vars[interpolatedStep.as] = result.value;
+            }
+            if ("http_request" in interpolatedStep && interpolatedStep.http_request.as && "value" in result && result.success && !result.skipped) {
+              vars[interpolatedStep.http_request.as] = result.value;
+            }
+
+            const duration = Date.now() - stepStart;
+
+            if (!result.success) {
+              emit(onEvent, { type: "step:fail", stepIndex: s, label: `Loop iteration ${i}, ${label}`, nested: null, duration_ms: duration, error: result.error || "Unknown error" });
+              // Build loop_context breadcrumb: prepend this level, carry inner context from nested loops
+              const thisLevel = { iteration: i, step: s, label };
+              const innerContext = result.loop_context || [];
+              return {
+                success: false,
+                error: `Loop iteration ${i}, step ${s} (${label}): ${result.error}`,
+                loop_context: [thisLevel, ...innerContext],
+              };
+            }
+
+            emit(onEvent, { type: "step:pass", stepIndex: s, label: `Loop iteration ${i}, ${label}`, nested: null, duration_ms: duration, ...(result.skipped ? { skipped: true } : {}) });
           }
-          if ("http_request" in interpolatedStep && interpolatedStep.http_request.as && "value" in result && result.success && !result.skipped) {
-            vars[interpolatedStep.http_request.as] = result.value;
-          }
-
-          const duration = Date.now() - stepStart;
-
-          if (!result.success) {
-            emit(onEvent, { type: "step:fail", stepIndex: s, label: `Loop iteration ${i}, ${label}`, nested: null, duration_ms: duration, error: result.error || "Unknown error" });
-            return {
-              success: false,
-              error: `Loop iteration ${i}, step ${s} (${label}): ${result.error}`,
-            };
-          }
-
-          emit(onEvent, { type: "step:pass", stepIndex: s, label: `Loop iteration ${i}, ${label}`, nested: null, duration_ms: duration, ...(result.skipped ? { skipped: true } : {}) });
         }
-      }
 
-      return { success: true };
+        return { success: true };
+      } finally {
+        unmarkVarSynced(asName);
+        unmarkVarSynced(indexAs);
+      }
     } else if (loop.while != null) {
       // --- while mode: repeat while condition is truthy ---
       if (loop.max == null) {
         return { success: false, error: "loop.while requires max to prevent infinite loops" };
       }
 
-      let iteration = 0;
-      while (iteration < loop.max) {
-        // Evaluate condition with current vars
-        const conditionExpr = interpolate(loop.while, {}, vars);
-        const condition = await client.evaluate(conditionExpr);
-        if (!condition) break;
+      try {
+        let iteration = 0;
+        while (iteration < loop.max) {
+          // Sync iteration index to browser
+          await syncLoopVar(indexAs, iteration);
 
-        for (let s = 0; s < loop.steps.length; s++) {
-          const nestedStep = loop.steps[s];
-          const interpolatedStep = interpolateStep(nestedStep, {}, vars);
-          const label = interpolatedStep.label || `Step ${s + 1}`;
+          // Evaluate condition with current vars
+          const conditionExpr = interpolate(loop.while, {}, vars);
+          const condition = await client.evaluate(`!!(${conditionExpr})`);
+          if (!condition) break;
 
-          emit(onEvent, { type: "step:start", stepIndex: s, label: `Loop iteration ${iteration}, ${label}`, nested: null });
-          const stepStart = Date.now();
+          for (let s = 0; s < loop.steps.length; s++) {
+            const nestedStep = loop.steps[s];
+            const interpolatedStep = interpolateStep(nestedStep, {}, vars);
+            const label = interpolatedStep.label || `Step ${s + 1}`;
 
-          const result = await executeStep(interpolatedStep, client, vars, onEvent, projectRoot, context);
+            emit(onEvent, { type: "step:start", stepIndex: s, label: `Loop iteration ${iteration}, ${label}`, nested: null });
+            const stepStart = Date.now();
 
-          // Store variable if step has 'as' field
-          if ("as" in interpolatedStep && interpolatedStep.as && "value" in result && result.success && !result.skipped) {
-            vars[interpolatedStep.as] = result.value;
+            const result = await executeStep(interpolatedStep, client, vars, onEvent, projectRoot, context);
+
+            // Store variable if step has 'as' field
+            if ("as" in interpolatedStep && interpolatedStep.as && "value" in result && result.success && !result.skipped) {
+              vars[interpolatedStep.as] = result.value;
+            }
+            if ("http_request" in interpolatedStep && interpolatedStep.http_request.as && "value" in result && result.success && !result.skipped) {
+              vars[interpolatedStep.http_request.as] = result.value;
+            }
+
+            const duration = Date.now() - stepStart;
+
+            if (!result.success) {
+              emit(onEvent, { type: "step:fail", stepIndex: s, label: `Loop iteration ${iteration}, ${label}`, nested: null, duration_ms: duration, error: result.error || "Unknown error" });
+              const thisLevel = { iteration, step: s, label };
+              const innerContext = result.loop_context || [];
+              return {
+                success: false,
+                error: `Loop iteration ${iteration}, step ${s} (${label}): ${result.error}`,
+                loop_context: [thisLevel, ...innerContext],
+              };
+            }
+
+            emit(onEvent, { type: "step:pass", stepIndex: s, label: `Loop iteration ${iteration}, ${label}`, nested: null, duration_ms: duration, ...(result.skipped ? { skipped: true } : {}) });
           }
-          if ("http_request" in interpolatedStep && interpolatedStep.http_request.as && "value" in result && result.success && !result.skipped) {
-            vars[interpolatedStep.http_request.as] = result.value;
-          }
 
-          const duration = Date.now() - stepStart;
-
-          if (!result.success) {
-            emit(onEvent, { type: "step:fail", stepIndex: s, label: `Loop iteration ${iteration}, ${label}`, nested: null, duration_ms: duration, error: result.error || "Unknown error" });
-            return {
-              success: false,
-              error: `Loop iteration ${iteration}, step ${s} (${label}): ${result.error}`,
-            };
-          }
-
-          emit(onEvent, { type: "step:pass", stepIndex: s, label: `Loop iteration ${iteration}, ${label}`, nested: null, duration_ms: duration, ...(result.skipped ? { skipped: true } : {}) });
+          iteration++;
         }
 
-        iteration++;
+        return { success: true };
+      } finally {
+        unmarkVarSynced(indexAs);
       }
-
-      return { success: true };
     } else {
       return { success: false, error: "loop step requires either 'over' or 'while'" };
     }
@@ -1887,6 +1924,22 @@ async function clearInputStep(
 }
 
 /**
+ * Build a JS expression that tests `innerText` against `text` using the given match mode.
+ * The returned expression assumes `innerText` and `text` variables are in scope in the browser.
+ * For regex mode, `text` is the pattern string passed to `new RegExp()`.
+ */
+function buildTextMatchExpr(text: string, matchMode: string): string {
+  if (matchMode === "regex") {
+    return `new RegExp(${JSON.stringify(text)}).test(innerText)`;
+  }
+  if (matchMode === "exact") {
+    return `innerText.trim() === ${JSON.stringify(text)}`;
+  }
+  // "contains" (default)
+  return `innerText.includes(${JSON.stringify(text)})`;
+}
+
+/**
  * Execute a wait_for_text step
  * Polls until text appears on page
  */
@@ -1898,17 +1951,19 @@ async function waitForTextStep(
     if (!step.wait_for_text || typeof step.wait_for_text.text !== "string") {
       return { success: false, error: "wait_for_text step requires text string" };
     }
-    const { text, selector, timeout: timeoutMs } = step.wait_for_text;
+    const { text, match: matchMode, selector, timeout: timeoutMs } = step.wait_for_text;
     const timeout = timeoutMs ?? 5000;
     const interval = 200;
     const deadline = Date.now() + timeout;
     const scope = selector ? JSON.stringify(selector) : "null";
+    const matchExpr = buildTextMatchExpr(text, matchMode ?? "contains");
 
     while (Date.now() < deadline) {
       const found = await client.evaluate(`(() => {
         const scope = ${scope} ? document.querySelector(${scope}) : document.body;
         if (!scope) return false;
-        return scope.innerText.includes(${JSON.stringify(text)});
+        const innerText = scope.innerText;
+        return ${matchExpr};
       })()`);
       if (found) return { success: true };
       if (Date.now() + interval > deadline) break;
@@ -1932,17 +1987,19 @@ async function waitForTextGoneStep(
     if (!step.wait_for_text_gone || typeof step.wait_for_text_gone.text !== "string") {
       return { success: false, error: "wait_for_text_gone step requires text string" };
     }
-    const { text, selector, timeout: timeoutMs } = step.wait_for_text_gone;
+    const { text, match: matchMode, selector, timeout: timeoutMs } = step.wait_for_text_gone;
     const timeout = timeoutMs ?? 5000;
     const interval = 200;
     const deadline = Date.now() + timeout;
     const scope = selector ? JSON.stringify(selector) : "null";
+    const matchExpr = buildTextMatchExpr(text, matchMode ?? "contains");
 
     while (Date.now() < deadline) {
       const found = await client.evaluate(`(() => {
         const scope = ${scope} ? document.querySelector(${scope}) : document.body;
         if (!scope) return false;
-        return scope.innerText.includes(${JSON.stringify(text)});
+        const innerText = scope.innerText;
+        return ${matchExpr};
       })()`);
       if (!found) return { success: true };
       if (Date.now() + interval > deadline) break;
@@ -1966,14 +2023,16 @@ async function assertTextStep(
     if (!step.assert_text || typeof step.assert_text.text !== "string") {
       return { success: false, error: "assert_text step requires text string" };
     }
-    const { text, absent, selector, retry } = step.assert_text;
+    const { text, absent, match: matchMode, selector, retry } = step.assert_text;
     const scope = selector ? JSON.stringify(selector) : "null";
+    const matchExpr = buildTextMatchExpr(text, matchMode ?? "contains");
 
     const checkOnce = async (): Promise<boolean> => {
       const found = await client.evaluate(`(() => {
         const scope = ${scope} ? document.querySelector(${scope}) : document.body;
         if (!scope) return false;
-        return scope.innerText.includes(${JSON.stringify(text)});
+        const innerText = scope.innerText;
+        return ${matchExpr};
       })()`);
       return absent ? !found : !!found;
     };
@@ -2014,16 +2073,23 @@ async function clickTextStep(
     const matchMode = match ?? "contains";
     const scope = selector ? JSON.stringify(selector) : "null";
 
+    // Build per-element match expression (uses `elText` variable)
+    let elMatchExpr: string;
+    if (matchMode === "regex") {
+      elMatchExpr = `new RegExp(${JSON.stringify(text)}).test(elText)`;
+    } else if (matchMode === "exact") {
+      elMatchExpr = `elText.trim() === ${JSON.stringify(text)}`;
+    } else {
+      elMatchExpr = `elText.includes(${JSON.stringify(text)})`;
+    }
+
     const result = await client.evaluate(`(() => {
       const scopeEl = ${scope} ? document.querySelector(${scope}) : document.body;
       if (!scopeEl) return 'scope_not_found';
       const candidates = scopeEl.querySelectorAll('[role="button"], [tabindex="0"], button, a, [dir="auto"]');
-      const text = ${JSON.stringify(text)};
-      const matchMode = ${JSON.stringify(matchMode)};
       for (const el of candidates) {
         const elText = el.textContent || '';
-        const matches = matchMode === 'exact' ? elText.trim() === text : elText.includes(text);
-        if (matches) {
+        if (${elMatchExpr}) {
           const clickable = el.closest('[tabindex="0"], [role="button"], button, a') || el;
           clickable.click();
           return 'ok';
@@ -2060,15 +2126,24 @@ async function clickNthStep(
     const cssSelector = selector ?? '[role="button"], [tabindex="0"]';
     const matchMode = match ?? "contains";
 
+    // Build per-element filter expression (uses `elText` variable)
+    let filterExpr: string;
+    if (matchMode === "regex") {
+      filterExpr = `new RegExp(${JSON.stringify(text ?? "")}).test(elText)`;
+    } else if (matchMode === "exact") {
+      filterExpr = `elText.trim() === ${JSON.stringify(text ?? "")}`;
+    } else {
+      filterExpr = `elText.includes(${JSON.stringify(text ?? "")})`;
+    }
+
     const result = await client.evaluate(`(() => {
       const all = Array.from(document.querySelectorAll(${JSON.stringify(cssSelector)}));
-      const text = ${text != null ? JSON.stringify(text) : "null"};
-      const matchMode = ${JSON.stringify(matchMode)};
+      const hasText = ${text != null};
       let filtered = all;
-      if (text !== null) {
+      if (hasText) {
         filtered = all.filter(el => {
           const elText = el.textContent || '';
-          return matchMode === 'exact' ? elText.trim() === text : elText.includes(text);
+          return ${filterExpr};
         });
       }
       const idx = ${index};
@@ -2155,8 +2230,19 @@ async function chooseDropdownStep(
     if (!step.choose_dropdown || typeof step.choose_dropdown.selector !== "string" || typeof step.choose_dropdown.text !== "string") {
       return { success: false, error: "choose_dropdown step requires selector and text strings" };
     }
-    const { selector, text, timeout: timeoutMs } = step.choose_dropdown;
+    const { selector, text, match: matchMode, timeout: timeoutMs } = step.choose_dropdown;
     const timeout = timeoutMs ?? 3000;
+
+    // Build the matching logic based on match mode
+    let matchExpr: string;
+    if (matchMode === "regex") {
+      matchExpr = `new RegExp(${JSON.stringify(text)}).test(opt.textContent)`;
+    } else if (matchMode === "exact") {
+      matchExpr = `opt.textContent && opt.textContent.trim() === ${JSON.stringify(text)}`;
+    } else {
+      // "contains" (default)
+      matchExpr = `opt.textContent && opt.textContent.includes(${JSON.stringify(text)})`;
+    }
 
     // Phase 1: Click to open
     await client.click(selector);
@@ -2169,7 +2255,7 @@ async function chooseDropdownStep(
         const options = document.querySelectorAll('[role="menuitem"], [role="option"]');
         if (options.length === 0) return 'no_options';
         for (const opt of options) {
-          if (opt.textContent && opt.textContent.includes(${JSON.stringify(text)})) {
+          if (${matchExpr}) {
             opt.click();
             return 'ok';
           }
@@ -2178,7 +2264,7 @@ async function chooseDropdownStep(
       })()`);
       if (result === "ok") return { success: true };
       if (result === "not_matched") {
-        return { success: false, error: `choose_dropdown: option "${text}" not found in dropdown` };
+        return { success: false, error: `choose_dropdown: option "${text}" not found in dropdown (match: ${matchMode || "contains"})` };
       }
       // no_options — keep polling
       if (Date.now() + interval > deadline) break;

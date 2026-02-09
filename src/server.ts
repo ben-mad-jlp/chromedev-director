@@ -162,10 +162,85 @@ const ListResultsInputSchema = z.object({
  * Zod schema for get_result tool input
  * Validates request to get a specific test run result
  */
+const SectionsEnum = z.enum(["console_log", "network_log", "dom_snapshot", "screenshot", "dom_snapshots", "step_definition"]);
+
 const GetResultInputSchema = z.object({
   testId: z.string(),
   runId: z.string(),
+  sections: z.array(SectionsEnum).optional(),
 });
+
+/**
+ * Zod schema for get_latest_result tool input
+ * Validates request to get the most recent test run result
+ */
+const GetLatestResultInputSchema = z.object({
+  testId: z.string(),
+  sections: z.array(SectionsEnum).optional(),
+});
+
+/**
+ * Summarize a TestResult for MCP output — strips large fields (logs, DOM, screenshots)
+ * and returns a compact summary pointing to get_result with sections for full details.
+ */
+function summarizeResult(
+  result: TestResult,
+  extra: { testId?: string; runId?: string } = {}
+): string {
+  const summary: Record<string, unknown> = {
+    status: result.status,
+    duration_ms: result.duration_ms,
+  };
+
+  if (extra.testId) summary.testId = extra.testId;
+  if (extra.runId) summary.runId = extra.runId;
+
+  if (result.status === "passed") {
+    summary.steps_completed = result.steps_completed;
+  } else {
+    summary.failed_step = result.failed_step;
+    if (result.failed_label) summary.failed_label = result.failed_label;
+    summary.error = result.error;
+    summary.step_definition = result.step_definition;
+    if (result.console_errors.length > 0) {
+      summary.console_errors = result.console_errors.slice(0, 5);
+      if (result.console_errors.length > 5) {
+        summary.console_errors_truncated = `${result.console_errors.length} total, showing first 5`;
+      }
+    }
+    if (result.screenshot) summary.has_screenshot = true;
+    if (result.dom_snapshot) summary.has_dom_snapshot = true;
+  }
+
+  // Summarize logs — counts + errors only
+  const errorLogs = result.console_log.filter(m => m.type === "error");
+  summary.console_log_summary = {
+    total: result.console_log.length,
+    errors: errorLogs.length,
+    ...(errorLogs.length > 0 && {
+      recent_errors: errorLogs.slice(-3).map(m => m.text.slice(0, 200)),
+    }),
+  };
+
+  const failedRequests = result.network_log.filter(r => r.status >= 400);
+  summary.network_log_summary = {
+    total: result.network_log.length,
+    failed: failedRequests.length,
+    ...(failedRequests.length > 0 && {
+      failed_requests: failedRequests.slice(0, 5).map(r => ({
+        method: r.method,
+        url: r.url,
+        status: r.status,
+      })),
+    }),
+  };
+
+  if (extra.testId && extra.runId) {
+    summary.hint = `Use get_result with testId="${extra.testId}", runId="${extra.runId}", and sections=["console_log","network_log","dom_snapshot","screenshot"] for full details.`;
+  }
+
+  return JSON.stringify(summary, null, 2);
+}
 
 /**
  * Create and configure the MCP server
@@ -554,67 +629,42 @@ Returns an array of result summaries ordered by timestamp (newest first).
 
   /**
    * Tool: get_result
-   * Retrieves the full result of a specific test run
+   * Retrieves the result of a specific test run (compact summary by default)
    */
   const getResultTool: ToolDef = {
     name: "get_result",
-    description: `Get the full result of a specific test run.
+    description: `Get the result of a specific test run.
 
-Retrieves complete details of a test run including all step information and error messages.
+By default returns a compact summary (status, error, counts). Pass \`sections\` to include large fields.
 
 ## Input Parameters
 
 - \`testId\` (string) — The test ID
 - \`runId\` (string) — The run ID to fetch
+- \`sections\` (string[], optional) — Large fields to include. Available: \`console_log\`, \`network_log\`, \`dom_snapshot\`, \`screenshot\`, \`dom_snapshots\`, \`step_definition\`
 
-## Output
+## Output (default — no sections)
 
-\`\`\`json
-{
-  "runId": "uuid",
-  "testId": "login-flow",
-  "timestamp": 1704067200000,
-  "status": "passed",
-  "duration_ms": 2345,
-  "result": {
-    "status": "passed",
-    "steps_completed": 8,
-    "duration_ms": 2345
-  }
-}
-\`\`\`
+Compact summary with status, duration, error info, log counts, and failed request summaries.
 
-or on failure:
+## Output (with sections)
 
-\`\`\`json
-{
-  "runId": "uuid",
-  "testId": "login-flow",
-  "timestamp": 1704067200000,
-  "status": "failed",
-  "duration_ms": 5678,
-  "result": {
-    "status": "failed",
-    "failed_step": 3,
-    "failed_label": "Click Login Button",
-    "step_definition": { "click": { "selector": "button[type='submit']" } },
-    "error": "Element not found",
-    "console_errors": ["TypeError: window.login is not a function"],
-    "dom_snapshot": "<html>..."
-  }
-}
-\`\`\`
+Same summary plus the requested large fields included in full.
 
-## Example
+## Examples
 
 \`\`\`json
 { "testId": "login-flow", "runId": "abc-123-def" }
 \`\`\`
 
+\`\`\`json
+{ "testId": "login-flow", "runId": "abc-123-def", "sections": ["dom_snapshot", "console_log"] }
+\`\`\`
+
 ## Notes
 
 - Returns null if the result is not found
-- For failed results, includes console_errors and dom_snapshot for debugging
+- \`dom_snapshot\`, \`screenshot\`, and \`step_definition\` are only available for failed runs
 - Use \`list_results\` first to get available run IDs`,
     inputSchema: {
       type: "object" as const,
@@ -627,6 +677,11 @@ or on failure:
           type: "string",
           description: "The run ID to fetch",
         },
+        sections: {
+          type: "array",
+          items: { type: "string", enum: ["console_log", "network_log", "dom_snapshot", "screenshot", "dom_snapshots", "step_definition"] },
+          description: "Optional list of large sections to include. Without this, returns a compact summary.",
+        },
       },
       required: ["testId", "runId"],
     },
@@ -635,19 +690,119 @@ or on failure:
       if (!parseResult.success) {
         throw new Error(`Validation error: ${parseResult.error.message}`);
       }
-      const { testId, runId } = parseResult.data;
+      const { testId, runId, sections } = parseResult.data;
       const run = await storageModule.getRun(ctx.storage.storageDir, testId, runId);
       if (!run) {
         throw new Error(`Result not found: ${runId}`);
       }
-      return {
+
+      const base: Record<string, unknown> = {
         runId: run.id,
         testId: run.testId,
         timestamp: new Date(run.startedAt).getTime(),
         status: run.status,
         duration_ms: run.duration_ms,
-        result: run.result,
+        summary: summarizeResult(run.result),
       };
+
+      if (sections && sections.length > 0) {
+        const r = run.result;
+        for (const s of sections) {
+          if (s === "console_log") base.console_log = r.console_log;
+          if (s === "network_log") base.network_log = r.network_log;
+          if (s === "dom_snapshots") base.dom_snapshots = r.dom_snapshots;
+          if (r.status === "failed") {
+            if (s === "dom_snapshot") base.dom_snapshot = r.dom_snapshot;
+            if (s === "screenshot") base.screenshot = r.screenshot;
+            if (s === "step_definition") base.step_definition = r.step_definition;
+          }
+        }
+      }
+
+      return base;
+    },
+  };
+
+  /**
+   * Tool: get_latest_result
+   * Retrieves the most recent test run result (compact summary by default)
+   */
+  const getLatestResultTool: ToolDef = {
+    name: "get_latest_result",
+    description: `Get the most recent test run result for a test.
+
+Retrieves the latest run without needing to call list_results first. By default returns a compact summary. Pass \`sections\` to include large fields.
+
+## Input Parameters
+
+- \`testId\` (string) — The test ID
+- \`sections\` (string[], optional) — Large fields to include. Available: \`console_log\`, \`network_log\`, \`dom_snapshot\`, \`screenshot\`, \`dom_snapshots\`, \`step_definition\`
+
+## Output
+
+Same format as \`get_result\` — compact summary by default, with optional large sections.
+
+Returns null content if no runs exist for the test.
+
+## Examples
+
+\`\`\`json
+{ "testId": "login-flow" }
+\`\`\`
+
+\`\`\`json
+{ "testId": "login-flow", "sections": ["console_log", "network_log"] }
+\`\`\``,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        testId: {
+          type: "string",
+          description: "The test ID to get the latest result for",
+        },
+        sections: {
+          type: "array",
+          items: { type: "string", enum: ["console_log", "network_log", "dom_snapshot", "screenshot", "dom_snapshots", "step_definition"] },
+          description: "Optional list of large sections to include. Without this, returns a compact summary.",
+        },
+      },
+      required: ["testId"],
+    },
+    handler: async (args: Record<string, any>, ctx: { storage: Storage }): Promise<any> => {
+      const parseResult = GetLatestResultInputSchema.safeParse(args);
+      if (!parseResult.success) {
+        throw new Error(`Validation error: ${parseResult.error.message}`);
+      }
+      const { testId, sections } = parseResult.data;
+      const run = await storageModule.getLatestRun(ctx.storage.storageDir, testId);
+      if (!run) {
+        return null;
+      }
+
+      const base: Record<string, unknown> = {
+        runId: run.id,
+        testId: run.testId,
+        timestamp: new Date(run.startedAt).getTime(),
+        status: run.status,
+        duration_ms: run.duration_ms,
+        summary: summarizeResult(run.result),
+      };
+
+      if (sections && sections.length > 0) {
+        const r = run.result;
+        for (const s of sections) {
+          if (s === "console_log") base.console_log = r.console_log;
+          if (s === "network_log") base.network_log = r.network_log;
+          if (s === "dom_snapshots") base.dom_snapshots = r.dom_snapshots;
+          if (r.status === "failed") {
+            if (s === "dom_snapshot") base.dom_snapshot = r.dom_snapshot;
+            if (s === "screenshot") base.screenshot = r.screenshot;
+            if (s === "step_definition") base.step_definition = r.step_definition;
+          }
+        }
+      }
+
+      return base;
     },
   };
 
@@ -809,27 +964,27 @@ These step types are syntactic sugar built on top of the primitives above. They 
 
 - **wait_for_text** — Wait until text appears on the page (polls at 200ms). Use after navigation or async loads.
   \`{ wait_for_text: { text: "Welcome", timeout: 10000 } }\`
-  \`text\` (string) — text to find. \`selector\` (string, optional) — scope. \`timeout\` (number, default 5000).
+  \`text\` (string) — text to find. \`match\` ("contains" | "exact" | "regex", default "contains"). \`selector\` (string, optional) — scope. \`timeout\` (number, default 5000).
 
 - **wait_for_text_gone** — Wait until text disappears from the page (polls at 200ms). Use after dismissing toasts or loaders.
   \`{ wait_for_text_gone: { text: "Loading..." } }\`
-  \`text\` (string) — text to wait for removal. \`selector\` (string, optional) — scope. \`timeout\` (number, default 5000).
+  \`text\` (string) — text to wait for removal. \`match\` ("contains" | "exact" | "regex", default "contains"). \`selector\` (string, optional) — scope. \`timeout\` (number, default 5000).
 
 - **assert_text** — Assert page contains (or doesn't contain) specific text. Supports optional retry polling.
   \`{ assert_text: { text: "Success" } }\`
   \`{ assert_text: { text: "Error", absent: true } }\`
   \`{ assert_text: { text: "Loaded", retry: { interval: 500, timeout: 5000 } } }\`
-  \`text\` (string) — text to check. \`absent\` (boolean) — assert text is NOT present. \`selector\` (string, optional) — scope. \`retry\` (optional) — poll at interval until timeout.
+  \`text\` (string) — text to check. \`match\` ("contains" | "exact" | "regex", default "contains"). \`absent\` (boolean) — assert text is NOT present. \`selector\` (string, optional) — scope. \`retry\` (optional) — poll at interval until timeout.
 
 - **click_text** — Click an element by visible text content. Searches buttons, links, and interactive elements.
   \`{ click_text: { text: "Submit" } }\`
   \`{ click_text: { text: "Delete", match: "exact" } }\`
-  \`text\` (string) — text to find. \`match\` ("exact" | "contains", default "contains"). \`selector\` (string, optional) — scope CSS.
+  \`text\` (string) — text to find. \`match\` ("contains" | "exact" | "regex", default "contains"). \`selector\` (string, optional) — scope CSS.
 
 - **click_nth** — Click the Nth element matching a selector or text pattern. Use when multiple elements match.
   \`{ click_nth: { index: 0, selector: ".list-item" } }\`
   \`{ click_nth: { index: 2, text: "Edit", selector: "button" } }\`
-  \`index\` (number) — 0-based index. \`text\` (string, optional) — filter by text. \`selector\` (string, optional, default interactive elements). \`match\` ("exact" | "contains", default "contains").
+  \`index\` (number) — 0-based index. \`text\` (string, optional) — filter by text. \`selector\` (string, optional, default interactive elements). \`match\` ("contains" | "exact" | "regex", default "contains").
 
 - **type** — Type text character by character with delays. Use for autocomplete inputs or debounced fields.
   \`{ type: { selector: "[aria-label='Search']", text: "react hooks", delay: 100 } }\`
@@ -838,7 +993,7 @@ These step types are syntactic sugar built on top of the primitives above. They 
 
 - **choose_dropdown** — Open a dropdown and select an option by text. Clicks the trigger, polls for options, then clicks the match.
   \`{ choose_dropdown: { selector: "[aria-label='Division']", text: "Engineering" } }\`
-  \`selector\` (string) — dropdown trigger CSS. \`text\` (string) — option text. \`timeout\` (number, default 3000).
+  \`selector\` (string) — dropdown trigger CSS. \`text\` (string) — option text. \`match\` ("contains" | "exact" | "regex", default "contains"). \`timeout\` (number, default 3000).
 
 - **expand_menu** — Expand a collapsed navigation group by name. Matches elements with \`aria-label="GroupName, collapsed"\`.
   \`{ expand_menu: { group: "Packaging" } }\`
@@ -913,7 +1068,7 @@ If the \`if\` expression throws, the step fails. If an eval step with \`as\` is 
    */
   const runSuiteTool: ToolDef = {
     name: "run_suite",
-    description: `Run a suite of saved tests sequentially and return aggregate results.
+    description: `Run a suite of saved tests with optional concurrency and return aggregate results.
 
 ## Input Parameters
 
@@ -921,6 +1076,7 @@ If the \`if\` expression throws, the step fails. If an eval step with \`as\` is 
 - \`testIds\` (array of strings, optional) — Run these specific tests by ID. Mutually exclusive with \`tag\`.
 - \`port\` (number, optional) — Chrome DevTools Protocol port (default: 9222)
 - \`stopOnFailure\` (boolean, optional) — Stop after first test failure (default: false)
+- \`concurrency\` (number, optional) — Max tests to run in parallel (default: 3, max: 10). Each concurrent test gets its own Chrome tab for isolation.
 
 Must provide either \`tag\` or \`testIds\`.
 
@@ -970,11 +1126,15 @@ Must provide either \`tag\` or \`testIds\`.
           type: "boolean",
           description: "Stop after first test failure (default: false)",
         },
+        concurrency: {
+          type: "number",
+          description: "Max tests to run in parallel (default: 3, max: 10). Each gets its own Chrome tab.",
+        },
       },
       required: [],
     },
     handler: async (args: Record<string, any>, ctx: { storage: Storage }): Promise<any> => {
-      const { tag, testIds, port, stopOnFailure } = args;
+      const { tag, testIds, port, stopOnFailure, concurrency } = args;
 
       if (!tag && (!testIds || testIds.length === 0)) {
         throw new Error("Either 'tag' or 'testIds' must be provided");
@@ -986,6 +1146,7 @@ Must provide either \`tag\` or \`testIds\`.
         port: port ?? 9222,
         stopOnFailure: stopOnFailure ?? false,
         storageDir: ctx.storage.storageDir,
+        concurrency: Math.min(Math.max(concurrency ?? 3, 1), 10),
       });
 
       return result;
@@ -1324,6 +1485,7 @@ Must provide either \`tag\` or \`testIds\`.
     moveStepTool,
     listResultsTool,
     getResultTool,
+    getLatestResultTool,
     runSuiteTool,
   ];
 
@@ -1341,67 +1503,6 @@ Must provide either \`tag\` or \`testIds\`.
     }),
     async (request: any) => {
       const { name, arguments: args = {} } = request.params;
-
-      // Summarize a TestResult for MCP output — strips large fields (logs, DOM, screenshots)
-      // and returns a compact summary pointing to get_result for full details.
-      function summarizeResult(
-        result: TestResult,
-        extra: { testId?: string; runId?: string } = {}
-      ): string {
-        const summary: Record<string, unknown> = {
-          status: result.status,
-          duration_ms: result.duration_ms,
-        };
-
-        if (extra.testId) summary.testId = extra.testId;
-        if (extra.runId) summary.runId = extra.runId;
-
-        if (result.status === "passed") {
-          summary.steps_completed = result.steps_completed;
-        } else {
-          summary.failed_step = result.failed_step;
-          if (result.failed_label) summary.failed_label = result.failed_label;
-          summary.error = result.error;
-          summary.step_definition = result.step_definition;
-          if (result.console_errors.length > 0) {
-            summary.console_errors = result.console_errors.slice(0, 5);
-            if (result.console_errors.length > 5) {
-              summary.console_errors_truncated = `${result.console_errors.length} total, showing first 5`;
-            }
-          }
-          if (result.screenshot) summary.has_screenshot = true;
-          if (result.dom_snapshot) summary.has_dom_snapshot = true;
-        }
-
-        // Summarize logs — counts + errors only
-        const errorLogs = result.console_log.filter(m => m.type === "error");
-        summary.console_log_summary = {
-          total: result.console_log.length,
-          errors: errorLogs.length,
-          ...(errorLogs.length > 0 && {
-            recent_errors: errorLogs.slice(-3).map(m => m.text.slice(0, 200)),
-          }),
-        };
-
-        const failedRequests = result.network_log.filter(r => r.status >= 400);
-        summary.network_log_summary = {
-          total: result.network_log.length,
-          failed: failedRequests.length,
-          ...(failedRequests.length > 0 && {
-            failed_requests: failedRequests.slice(0, 5).map(r => ({
-              method: r.method,
-              url: r.url,
-              status: r.status,
-            })),
-          }),
-        };
-
-        if (extra.testId && extra.runId) {
-          summary.hint = `Use get_result with testId="${extra.testId}" and runId="${extra.runId}" for full logs, DOM snapshots, and screenshots.`;
-        }
-
-        return JSON.stringify(summary, null, 2);
-      }
 
       // Special handling for run_test (supports two modes: testId or inline test)
       if (name === "run_test") {

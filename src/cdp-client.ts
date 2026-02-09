@@ -54,15 +54,19 @@ export class CDPClient {
   private onEvent?: OnEvent;
   private currentExecutionContextId?: number;
   private dialogHandler?: { action: "accept" | "dismiss"; text?: string };
+  private createTab: boolean;
+  private ownedTargetId?: string;
 
   /**
    * Creates a new CDP client instance
    * @param port - The port on which Chrome DevTools Protocol server is listening
    * @param onEvent - Optional callback for emitting console and network events
+   * @param options - Optional configuration (createTab: create a new Chrome tab for isolation)
    */
-  constructor(port: number, onEvent?: OnEvent) {
+  constructor(port: number, onEvent?: OnEvent, options?: { createTab?: boolean }) {
     this.port = port;
     this.onEvent = onEvent;
+    this.createTab = options?.createTab ?? false;
   }
 
   /**
@@ -137,18 +141,27 @@ export class CDPClient {
         Input,
       };
 
-      // Get the first page target (filter by type to avoid service workers, extensions, etc.)
-      const targets = await Target.getTargets();
-      if (!targets.targetInfos || targets.targetInfos.length === 0) {
-        throw new Error("No targets available");
-      }
+      // Determine target: create a new tab or find an existing page target
+      let targetId: string;
 
-      const pageTarget = targets.targetInfos.find(
-        (t: any) => t.type === "page"
-      );
-      const targetId = pageTarget
-        ? pageTarget.targetId
-        : targets.targetInfos[0].targetId;
+      if (this.createTab) {
+        const created = await Target.createTarget({ url: "about:blank" });
+        targetId = created.targetId;
+        this.ownedTargetId = targetId;
+      } else {
+        // Existing behavior: find the first page target
+        const targets = await Target.getTargets();
+        if (!targets.targetInfos || targets.targetInfos.length === 0) {
+          throw new Error("No targets available");
+        }
+
+        const pageTarget = targets.targetInfos.find(
+          (t: any) => t.type === "page"
+        );
+        targetId = pageTarget
+          ? pageTarget.targetId
+          : targets.targetInfos[0].targetId;
+      }
 
       // Attach to the target to get a sessionId
       const { sessionId } = await Target.attachToTarget({
@@ -988,6 +1001,15 @@ export class CDPClient {
       // Set connected=false BEFORE closing so in-flight event handlers
       // (e.g., Fetch.requestPaused) see the disconnected state immediately
       this.connected = false;
+
+      // Close the owned tab if we created one
+      if (this.ownedTargetId) {
+        try {
+          await this.domains.Target.closeTarget({ targetId: this.ownedTargetId });
+        } catch { /* tab may already be closed */ }
+        this.ownedTargetId = undefined;
+      }
+
       try {
         await this.client.close();
       } catch (error) {
