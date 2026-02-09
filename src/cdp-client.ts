@@ -56,6 +56,7 @@ export class CDPClient {
   private dialogHandler?: { action: "accept" | "dismiss"; text?: string };
   private createTab: boolean;
   private ownedTargetId?: string;
+  private eventUnsubscribers: Array<() => void> = [];
 
   /**
    * Creates a new CDP client instance
@@ -95,6 +96,43 @@ export class CDPClient {
   }
 
   /**
+   * Wraps an event handler with error boundary to prevent handler errors from crashing tests
+   * @param handler - The event handler function to wrap
+   * @param eventName - Name of the event for error logging
+   * @returns Wrapped handler that catches and logs errors
+   */
+  private wrapEventListener<T>(
+    handler: (data: T) => void,
+    eventName: string
+  ): (data: T) => void {
+    return (data: T) => {
+      try {
+        handler(data);
+      } catch (err) {
+        if (this.verbose) {
+          console.error(`Error in ${eventName} event handler: ${err}`);
+        }
+        // Continue execution - don't let handler errors crash tests
+      }
+    };
+  }
+
+  /**
+   * Cleans up all registered event listeners
+   * Should be called before reconnecting or closing to prevent listener accumulation
+   */
+  private cleanupEventListeners(): void {
+    for (const unsubscribe of this.eventUnsubscribers) {
+      try {
+        unsubscribe();
+      } catch {
+        // Ignore unsubscribe errors (connection may be dead)
+      }
+    }
+    this.eventUnsubscribers = [];
+  }
+
+  /**
    * Connects to Chrome DevTools Protocol
    * Retrieves the first page target, attaches to it,
    * and enables necessary domains (Console, Network, Fetch)
@@ -113,6 +151,9 @@ export class CDPClient {
         this.client = null;
         this.connected = false;
       }
+
+      // Clean up old event listeners before registering new ones
+      this.cleanupEventListeners();
 
       // Clear accumulated state from previous runs
       this.consoleMessages = [];
@@ -183,7 +224,7 @@ export class CDPClient {
       });
 
       // Set up listeners for console messages
-      Console.messageAdded((message: any) => {
+      const consoleHandler = this.wrapEventListener((message: any) => {
         const consoleMessage = message.message;
         const messageText = consoleMessage.text || "";
         const messageLevel = consoleMessage.level;
@@ -209,16 +250,20 @@ export class CDPClient {
             }
           }
         }
-      });
+      }, "Console.messageAdded");
+      const unsubConsole = Console.messageAdded(consoleHandler);
+      this.eventUnsubscribers.push(unsubConsole);
 
       // Set up listeners for network responses
-      Network.requestWillBeSent((request: any) => {
+      const requestWillBeSentHandler = this.wrapEventListener((request: any) => {
         // Track when requests start for duration calculation
         const requestId = request.requestId;
         this.networkRequestTimes.set(requestId, Date.now());
-      });
+      }, "Network.requestWillBeSent");
+      const unsubRequestWillBeSent = Network.requestWillBeSent(requestWillBeSentHandler);
+      this.eventUnsubscribers.push(unsubRequestWillBeSent);
 
-      Network.responseReceived((response: any) => {
+      const responseReceivedHandler = this.wrapEventListener((response: any) => {
         const requestId = response.requestId;
         const responseUrl = response.response.url;
         const responseStatus = response.response.status;
@@ -265,17 +310,21 @@ export class CDPClient {
 
         // Clean up tracking data
         this.networkRequestTimes.delete(requestId);
-      });
+      }, "Network.responseReceived");
+      const unsubResponseReceived = Network.responseReceived(responseReceivedHandler);
+      this.eventUnsubscribers.push(unsubResponseReceived);
 
       // Set up listener for fetch requests (for mocking)
-      Fetch.requestPaused((request: any) => {
+      const requestPausedHandler = this.wrapEventListener((request: any) => {
         this.handleMockRequest(request).catch((err) => {
           console.error(`Unhandled error in mock request handler: ${err}`);
         });
-      });
+      }, "Fetch.requestPaused");
+      const unsubRequestPaused = Fetch.requestPaused(requestPausedHandler);
+      this.eventUnsubscribers.push(unsubRequestPaused);
 
       // Set up listener for JavaScript dialogs (alert/confirm/prompt)
-      Page.javascriptDialogOpening(() => {
+      const dialogOpeningHandler = this.wrapEventListener(() => {
         const handler = this.dialogHandler ?? { action: "dismiss" };
         Page.handleJavaScriptDialog({
           accept: handler.action === "accept",
@@ -285,7 +334,9 @@ export class CDPClient {
             console.error(`Error handling dialog: ${err}`);
           }
         });
-      });
+      }, "Page.javascriptDialogOpening");
+      const unsubDialogOpening = Page.javascriptDialogOpening(dialogOpeningHandler);
+      this.eventUnsubscribers.push(unsubDialogOpening);
 
       this.connected = true;
     } catch (error) {
@@ -1001,6 +1052,9 @@ export class CDPClient {
       // Set connected=false BEFORE closing so in-flight event handlers
       // (e.g., Fetch.requestPaused) see the disconnected state immediately
       this.connected = false;
+
+      // Clean up event listeners before closing
+      this.cleanupEventListeners();
 
       // Close the owned tab if we created one
       if (this.ownedTargetId) {
