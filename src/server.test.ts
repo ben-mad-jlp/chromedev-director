@@ -514,6 +514,224 @@ describe('MCP Server Tools - Storage Layer', () => {
     });
   });
 
+  describe('update_test - Test Metadata Update', () => {
+    it('should update test name', async () => {
+      const testId = 'update-name-test';
+      await storageModule.saveTest(storageDir, testId, 'Original Name', simpleTestDef);
+
+      const updated = await storageModule.updateTest(storageDir, testId, { name: 'New Name' });
+
+      expect(updated.name).toBe('New Name');
+      expect(updated.definition).toEqual(simpleTestDef);
+    });
+
+    it('should update test description', async () => {
+      const testId = 'update-desc-test';
+      await storageModule.saveTest(storageDir, testId, 'Test', simpleTestDef, { description: 'Old desc' });
+
+      const updated = await storageModule.updateTest(storageDir, testId, { description: 'New desc' });
+
+      expect(updated.description).toBe('New desc');
+    });
+
+    it('should replace tags entirely', async () => {
+      const testId = 'update-tags-test';
+      await storageModule.saveTest(storageDir, testId, 'Test', simpleTestDef, { tags: ['old', 'tags'] });
+
+      const updated = await storageModule.updateTest(storageDir, testId, { tags: ['new'] });
+
+      expect(updated.tags).toEqual(['new']);
+    });
+
+    it('should update test definition', async () => {
+      const testId = 'update-def-test';
+      await storageModule.saveTest(storageDir, testId, 'Test', simpleTestDef);
+
+      const newDef: TestDef = { url: 'https://new.com', steps: [{ wait: 500 }] };
+      const updated = await storageModule.updateTest(storageDir, testId, { definition: newDef });
+
+      expect(updated.definition).toEqual(newDef);
+    });
+
+    it('should bump updatedAt timestamp', async () => {
+      const testId = 'update-timestamp-test';
+      const saved = await storageModule.saveTest(storageDir, testId, 'Test', simpleTestDef);
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const updated = await storageModule.updateTest(storageDir, testId, { name: 'Updated' });
+
+      expect(new Date(updated.updatedAt).getTime()).toBeGreaterThan(new Date(saved.updatedAt).getTime());
+    });
+
+    it('should throw when test not found', async () => {
+      await expect(
+        storageModule.updateTest(storageDir, 'nonexistent', { name: 'X' })
+      ).rejects.toThrow('Test not found');
+    });
+
+    it('should leave omitted fields unchanged', async () => {
+      const testId = 'partial-update-test';
+      await storageModule.saveTest(storageDir, testId, 'Original', simpleTestDef, {
+        description: 'Keep this',
+        tags: ['keep'],
+      });
+
+      const updated = await storageModule.updateTest(storageDir, testId, { name: 'New Name' });
+
+      expect(updated.name).toBe('New Name');
+      expect(updated.description).toBe('Keep this');
+      expect(updated.tags).toEqual(['keep']);
+      expect(updated.definition).toEqual(simpleTestDef);
+    });
+  });
+
+  describe('add_step - Step Insertion', () => {
+    it('should append a step to the end by default', async () => {
+      const testId = 'add-step-end';
+      await storageModule.saveTest(storageDir, testId, 'Test', simpleTestDef);
+
+      const test = (await storageModule.getTest(storageDir, testId))!;
+      const steps = [...test.definition.steps, { wait: 500, label: 'New step' }];
+      await storageModule.updateTest(storageDir, testId, {
+        definition: { ...test.definition, steps },
+      });
+
+      const updated = (await storageModule.getTest(storageDir, testId))!;
+      expect(updated.definition.steps).toHaveLength(3);
+      expect(updated.definition.steps[2]).toEqual({ wait: 500, label: 'New step' });
+    });
+
+    it('should insert a step at a specific index', async () => {
+      const testId = 'add-step-index';
+      await storageModule.saveTest(storageDir, testId, 'Test', simpleTestDef);
+
+      const test = (await storageModule.getTest(storageDir, testId))!;
+      const steps = [...test.definition.steps];
+      steps.splice(1, 0, { wait: 500, label: 'Inserted' });
+      await storageModule.updateTest(storageDir, testId, {
+        definition: { ...test.definition, steps },
+      });
+
+      const updated = (await storageModule.getTest(storageDir, testId))!;
+      expect(updated.definition.steps).toHaveLength(3);
+      expect(updated.definition.steps[1]).toEqual({ wait: 500, label: 'Inserted' });
+    });
+
+    it('should add a step to the before section', async () => {
+      const testId = 'add-step-before';
+      const testDef: TestDef = { url: 'https://example.com', steps: [{ eval: 'true' }] };
+      await storageModule.saveTest(storageDir, testId, 'Test', testDef);
+
+      const test = (await storageModule.getTest(storageDir, testId))!;
+      await storageModule.updateTest(storageDir, testId, {
+        definition: { ...test.definition, before: [{ eval: 'setup()' }] },
+      });
+
+      const updated = (await storageModule.getTest(storageDir, testId))!;
+      expect(updated.definition.before).toHaveLength(1);
+      expect(updated.definition.before![0]).toEqual({ eval: 'setup()' });
+    });
+  });
+
+  describe('remove_step - Step Removal', () => {
+    it('should remove a step by index', async () => {
+      const testId = 'remove-step';
+      await storageModule.saveTest(storageDir, testId, 'Test', simpleTestDef);
+
+      const test = (await storageModule.getTest(storageDir, testId))!;
+      const steps = [...test.definition.steps];
+      steps.splice(0, 1);
+      await storageModule.updateTest(storageDir, testId, {
+        definition: { ...test.definition, steps },
+      });
+
+      const updated = (await storageModule.getTest(storageDir, testId))!;
+      expect(updated.definition.steps).toHaveLength(1);
+      expect(updated.definition.steps[0]).toEqual({ label: 'Assert success', assert: 'true' });
+    });
+
+    it('should return the removed step', async () => {
+      const testId = 'remove-step-return';
+      await storageModule.saveTest(storageDir, testId, 'Test', simpleTestDef);
+
+      const test = (await storageModule.getTest(storageDir, testId))!;
+      const removed = test.definition.steps[1];
+      const steps = [...test.definition.steps];
+      steps.splice(1, 1);
+
+      expect(removed).toEqual({ label: 'Assert success', assert: 'true' });
+    });
+  });
+
+  describe('update_step - Step Replacement', () => {
+    it('should replace a step at a specific index', async () => {
+      const testId = 'update-step';
+      await storageModule.saveTest(storageDir, testId, 'Test', simpleTestDef);
+
+      const test = (await storageModule.getTest(storageDir, testId))!;
+      const steps = [...test.definition.steps];
+      steps[0] = { eval: 'document.body', as: 'body', label: 'Get body' };
+      await storageModule.updateTest(storageDir, testId, {
+        definition: { ...test.definition, steps },
+      });
+
+      const updated = (await storageModule.getTest(storageDir, testId))!;
+      expect(updated.definition.steps[0]).toEqual({ eval: 'document.body', as: 'body', label: 'Get body' });
+      expect(updated.definition.steps).toHaveLength(2);
+    });
+  });
+
+  describe('move_step - Step Reordering', () => {
+    it('should move a step from one position to another', async () => {
+      const testId = 'move-step';
+      const testDef: TestDef = {
+        url: 'https://example.com',
+        steps: [
+          { label: 'A', eval: 'a' },
+          { label: 'B', eval: 'b' },
+          { label: 'C', eval: 'c' },
+        ],
+      };
+      await storageModule.saveTest(storageDir, testId, 'Test', testDef);
+
+      // Move step 0 (A) to position 2
+      const test = (await storageModule.getTest(storageDir, testId))!;
+      const steps = [...test.definition.steps];
+      const [moved] = steps.splice(0, 1);
+      steps.splice(2, 0, moved);
+      await storageModule.updateTest(storageDir, testId, {
+        definition: { ...test.definition, steps },
+      });
+
+      const updated = (await storageModule.getTest(storageDir, testId))!;
+      expect(updated.definition.steps.map((s: any) => s.label)).toEqual(['B', 'C', 'A']);
+    });
+
+    it('should preserve step count after move', async () => {
+      const testId = 'move-step-count';
+      const testDef: TestDef = {
+        url: 'https://example.com',
+        steps: [
+          { label: 'A', eval: 'a' },
+          { label: 'B', eval: 'b' },
+          { label: 'C', eval: 'c' },
+        ],
+      };
+      await storageModule.saveTest(storageDir, testId, 'Test', testDef);
+
+      const test = (await storageModule.getTest(storageDir, testId))!;
+      const steps = [...test.definition.steps];
+      const [moved] = steps.splice(2, 1);
+      steps.splice(0, 0, moved);
+      await storageModule.updateTest(storageDir, testId, {
+        definition: { ...test.definition, steps },
+      });
+
+      const updated = (await storageModule.getTest(storageDir, testId))!;
+      expect(updated.definition.steps).toHaveLength(3);
+    });
+  });
+
   describe('Integration: Full Test Lifecycle', () => {
     it('should handle complete test save and retrieve cycle', async () => {
       const testId = 'lifecycle-test';

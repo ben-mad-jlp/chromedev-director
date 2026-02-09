@@ -27,6 +27,10 @@ interface Storage {
   getTest(id: string): Promise<SavedTest | null>;
   listTests(filter?: { tag?: string }): Promise<SavedTest[]>;
   deleteTest(id: string): Promise<void>;
+  updateTest(
+    id: string,
+    updates: Partial<Pick<SavedTest, 'name' | 'description' | 'tags' | 'definition'>>
+  ): Promise<SavedTest>;
   saveRun(testId: string, result: TestResult): Promise<any>;
 }
 
@@ -95,6 +99,49 @@ const DeleteTestInputSchema = z.object({
 });
 
 /**
+ * Zod schema for update_test tool input
+ */
+const UpdateTestInputSchema = z.object({
+  id: z.string().min(1, "id is required"),
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  test: TestDefSchema.optional(),
+});
+
+/**
+ * Zod schema for step-level tool inputs
+ */
+const SectionSchema = z.enum(["steps", "before", "after"]).default("steps");
+
+const AddStepInputSchema = z.object({
+  id: z.string().min(1, "id is required"),
+  step: z.record(z.unknown()),
+  index: z.number().int().min(0).optional(),
+  section: SectionSchema,
+});
+
+const RemoveStepInputSchema = z.object({
+  id: z.string().min(1, "id is required"),
+  index: z.number().int().min(0),
+  section: SectionSchema,
+});
+
+const UpdateStepInputSchema = z.object({
+  id: z.string().min(1, "id is required"),
+  index: z.number().int().min(0),
+  step: z.record(z.unknown()),
+  section: SectionSchema,
+});
+
+const MoveStepInputSchema = z.object({
+  id: z.string().min(1, "id is required"),
+  from: z.number().int().min(0),
+  to: z.number().int().min(0),
+  section: SectionSchema,
+});
+
+/**
  * Zod schema for list_results tool input
  * Validates request to list test run results
  */
@@ -151,6 +198,12 @@ export function createMcpServer(): Server {
     },
     async deleteTest(id: string): Promise<void> {
       return storageModule.deleteTest(storageDir, id);
+    },
+    async updateTest(
+      id: string,
+      updates: Partial<Pick<SavedTest, 'name' | 'description' | 'tags' | 'definition'>>
+    ): Promise<SavedTest> {
+      return storageModule.updateTest(storageDir, id, updates);
     },
     async saveRun(testId: string, result: TestResult): Promise<any> {
       return storageModule.saveRun(storageDir, testId, result);
@@ -690,6 +743,12 @@ InputDef = { name: string, label: string, type: 'text' | 'number' | 'boolean', d
   \`{ handle_dialog: { action: "accept" } }\`
   \`{ handle_dialog: { action: "accept", text: "yes" } }\`
 
+- **http_request** — Make a server-side HTTP request (Node fetch, not browser). Useful for API setup/teardown.
+  In before hooks, runs BEFORE navigation (seeds external services before app loads).
+  Response body stored in \`$vars\` via \`as\` field.
+  \`{ http_request: { url: "$env.API/seed/reset", method: "POST" } }\`
+  \`{ http_request: { url: "$env.API/data", as: "response" } }\`
+
 ## Conditional steps
 
 Any step can have an \`if\` field with a JS expression. If the expression evaluates to falsy, the step is silently skipped.
@@ -822,6 +881,322 @@ Must provide either \`tag\` or \`testIds\`.
   };
 
   /**
+   * Tool: update_test
+   * Update test metadata and/or definition
+   */
+  const updateTestTool: ToolDef = {
+    name: "update_test",
+    description: `Update a saved test's metadata and/or definition.
+
+## Input Parameters
+
+- \`id\` (string, required) — The test ID to update
+- \`name\` (string, optional) — New display name
+- \`description\` (string, optional) — New description
+- \`tags\` (string[], optional) — New tags (replaces existing tags, does not merge)
+- \`test\` (TestDef, optional) — New full test definition (replaces entire definition)
+
+## Output
+
+\`\`\`json
+{ "id": "login-flow", "name": "Login Flow", "updatedAt": "2026-02-09T..." }
+\`\`\`
+
+## Example
+
+\`\`\`json
+{ "id": "login-flow", "name": "Login Flow v2", "tags": ["auth", "regression"] }
+\`\`\`
+
+## Notes
+
+- Only provided fields are updated; omitted fields are left unchanged
+- Tags are replaced entirely (not merged) — pass the full desired tag list
+- Returns an error if the test is not found`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        id: { type: "string", description: "The test ID to update" },
+        name: { type: "string", description: "New display name" },
+        description: { type: "string", description: "New description" },
+        tags: { type: "array", items: { type: "string" }, description: "New tags (replaces existing)" },
+        test: { type: "object", description: "New full test definition (TestDef)" },
+      },
+      required: ["id"],
+    },
+    handler: async (args: Record<string, any>, ctx: { storage: Storage }): Promise<any> => {
+      const parseResult = UpdateTestInputSchema.safeParse(args);
+      if (!parseResult.success) {
+        throw new Error(`Validation error: ${parseResult.error.message}`);
+      }
+      const { id, name, description, tags, test } = parseResult.data;
+      const updates: Partial<Pick<SavedTest, 'name' | 'description' | 'tags' | 'definition'>> = {};
+      if (name !== undefined) updates.name = name;
+      if (description !== undefined) updates.description = description;
+      if (tags !== undefined) updates.tags = tags;
+      if (test !== undefined) updates.definition = test as TestDef;
+      const updated = await ctx.storage.updateTest(id, updates);
+      return { id: updated.id, name: updated.name, updatedAt: updated.updatedAt };
+    },
+  };
+
+  /**
+   * Helper: get the steps array for a section, initializing if needed
+   */
+  function getSection(definition: TestDef, section: "steps" | "before" | "after"): any[] {
+    if (section === "steps") return definition.steps;
+    if (!definition[section]) definition[section] = [];
+    return definition[section]!;
+  }
+
+  /**
+   * Tool: add_step
+   * Insert a step into a saved test
+   */
+  const addStepTool: ToolDef = {
+    name: "add_step",
+    description: `Insert a step into a saved test at a specific position.
+
+## Input Parameters
+
+- \`id\` (string, required) — The test ID
+- \`step\` (StepDef, required) — The step to insert
+- \`index\` (number, optional) — Position to insert at (default: end of section)
+- \`section\` ("steps" | "before" | "after", optional) — Which section to modify (default: "steps")
+
+## Output
+
+\`\`\`json
+{ "id": "login-flow", "section": "steps", "index": 2, "total_steps": 5 }
+\`\`\`
+
+## Example
+
+\`\`\`json
+{ "id": "login-flow", "step": { "wait": 1000, "label": "Wait for render" }, "index": 3 }
+\`\`\``,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        id: { type: "string", description: "The test ID" },
+        step: { type: "object", description: "The step definition to insert" },
+        index: { type: "number", description: "Position to insert at (default: end)" },
+        section: { type: "string", enum: ["steps", "before", "after"], description: "Section to modify (default: steps)" },
+      },
+      required: ["id", "step"],
+    },
+    handler: async (args: Record<string, any>, ctx: { storage: Storage }): Promise<any> => {
+      const parseResult = AddStepInputSchema.safeParse(args);
+      if (!parseResult.success) {
+        throw new Error(`Validation error: ${parseResult.error.message}`);
+      }
+      const { id, step, index, section } = parseResult.data;
+      const test = await ctx.storage.getTest(id);
+      if (!test) throw new Error(`Test not found: ${id}`);
+
+      const definition = { ...test.definition };
+      if (section !== "steps") {
+        definition[section] = definition[section] ? [...definition[section]!] : [];
+      } else {
+        definition.steps = [...definition.steps];
+      }
+      const arr = getSection(definition, section);
+      const insertAt = index ?? arr.length;
+      if (insertAt < 0 || insertAt > arr.length) {
+        throw new Error(`Index ${insertAt} out of bounds (0..${arr.length})`);
+      }
+      arr.splice(insertAt, 0, step);
+      await ctx.storage.updateTest(id, { definition });
+      return { id, section, index: insertAt, total_steps: arr.length };
+    },
+  };
+
+  /**
+   * Tool: remove_step
+   * Remove a step by index from a saved test
+   */
+  const removeStepTool: ToolDef = {
+    name: "remove_step",
+    description: `Remove a step by index from a saved test.
+
+## Input Parameters
+
+- \`id\` (string, required) — The test ID
+- \`index\` (number, required) — Step index to remove
+- \`section\` ("steps" | "before" | "after", optional) — Which section to modify (default: "steps")
+
+## Output
+
+\`\`\`json
+{ "id": "login-flow", "section": "steps", "removed_step": { "wait": 1000 }, "total_steps": 4 }
+\`\`\`
+
+## Example
+
+\`\`\`json
+{ "id": "login-flow", "index": 2 }
+\`\`\``,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        id: { type: "string", description: "The test ID" },
+        index: { type: "number", description: "Step index to remove" },
+        section: { type: "string", enum: ["steps", "before", "after"], description: "Section to modify (default: steps)" },
+      },
+      required: ["id", "index"],
+    },
+    handler: async (args: Record<string, any>, ctx: { storage: Storage }): Promise<any> => {
+      const parseResult = RemoveStepInputSchema.safeParse(args);
+      if (!parseResult.success) {
+        throw new Error(`Validation error: ${parseResult.error.message}`);
+      }
+      const { id, index, section } = parseResult.data;
+      const test = await ctx.storage.getTest(id);
+      if (!test) throw new Error(`Test not found: ${id}`);
+
+      const definition = { ...test.definition };
+      if (section !== "steps") {
+        definition[section] = definition[section] ? [...definition[section]!] : [];
+      } else {
+        definition.steps = [...definition.steps];
+      }
+      const arr = getSection(definition, section);
+      if (index < 0 || index >= arr.length) {
+        throw new Error(`Index ${index} out of bounds (0..${arr.length - 1})`);
+      }
+      const [removed] = arr.splice(index, 1);
+      await ctx.storage.updateTest(id, { definition });
+      return { id, section, removed_step: removed, total_steps: arr.length };
+    },
+  };
+
+  /**
+   * Tool: update_step
+   * Replace a step at an index in a saved test
+   */
+  const updateStepTool: ToolDef = {
+    name: "update_step",
+    description: `Replace a step at a specific index in a saved test.
+
+## Input Parameters
+
+- \`id\` (string, required) — The test ID
+- \`index\` (number, required) — Step index to replace
+- \`step\` (StepDef, required) — New step definition
+- \`section\` ("steps" | "before" | "after", optional) — Which section to modify (default: "steps")
+
+## Output
+
+\`\`\`json
+{ "id": "login-flow", "section": "steps", "index": 2, "total_steps": 5 }
+\`\`\`
+
+## Example
+
+\`\`\`json
+{ "id": "login-flow", "index": 1, "step": { "click": { "selector": "#new-btn" }, "label": "Click new button" } }
+\`\`\``,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        id: { type: "string", description: "The test ID" },
+        index: { type: "number", description: "Step index to replace" },
+        step: { type: "object", description: "New step definition" },
+        section: { type: "string", enum: ["steps", "before", "after"], description: "Section to modify (default: steps)" },
+      },
+      required: ["id", "index", "step"],
+    },
+    handler: async (args: Record<string, any>, ctx: { storage: Storage }): Promise<any> => {
+      const parseResult = UpdateStepInputSchema.safeParse(args);
+      if (!parseResult.success) {
+        throw new Error(`Validation error: ${parseResult.error.message}`);
+      }
+      const { id, index, step, section } = parseResult.data;
+      const test = await ctx.storage.getTest(id);
+      if (!test) throw new Error(`Test not found: ${id}`);
+
+      const definition = { ...test.definition };
+      if (section !== "steps") {
+        definition[section] = definition[section] ? [...definition[section]!] : [];
+      } else {
+        definition.steps = [...definition.steps];
+      }
+      const arr = getSection(definition, section);
+      if (index < 0 || index >= arr.length) {
+        throw new Error(`Index ${index} out of bounds (0..${arr.length - 1})`);
+      }
+      arr[index] = step;
+      await ctx.storage.updateTest(id, { definition });
+      return { id, section, index, total_steps: arr.length };
+    },
+  };
+
+  /**
+   * Tool: move_step
+   * Reorder a step within a section of a saved test
+   */
+  const moveStepTool: ToolDef = {
+    name: "move_step",
+    description: `Reorder a step within a section of a saved test.
+
+## Input Parameters
+
+- \`id\` (string, required) — The test ID
+- \`from\` (number, required) — Current step index
+- \`to\` (number, required) — Target step index
+- \`section\` ("steps" | "before" | "after", optional) — Which section to modify (default: "steps")
+
+## Output
+
+\`\`\`json
+{ "id": "login-flow", "section": "steps", "from": 0, "to": 3, "total_steps": 5 }
+\`\`\`
+
+## Example
+
+\`\`\`json
+{ "id": "login-flow", "from": 0, "to": 2 }
+\`\`\``,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        id: { type: "string", description: "The test ID" },
+        from: { type: "number", description: "Current step index" },
+        to: { type: "number", description: "Target step index" },
+        section: { type: "string", enum: ["steps", "before", "after"], description: "Section to modify (default: steps)" },
+      },
+      required: ["id", "from", "to"],
+    },
+    handler: async (args: Record<string, any>, ctx: { storage: Storage }): Promise<any> => {
+      const parseResult = MoveStepInputSchema.safeParse(args);
+      if (!parseResult.success) {
+        throw new Error(`Validation error: ${parseResult.error.message}`);
+      }
+      const { id, from, to, section } = parseResult.data;
+      const test = await ctx.storage.getTest(id);
+      if (!test) throw new Error(`Test not found: ${id}`);
+
+      const definition = { ...test.definition };
+      if (section !== "steps") {
+        definition[section] = definition[section] ? [...definition[section]!] : [];
+      } else {
+        definition.steps = [...definition.steps];
+      }
+      const arr = getSection(definition, section);
+      if (from < 0 || from >= arr.length) {
+        throw new Error(`'from' index ${from} out of bounds (0..${arr.length - 1})`);
+      }
+      if (to < 0 || to >= arr.length) {
+        throw new Error(`'to' index ${to} out of bounds (0..${arr.length - 1})`);
+      }
+      const [moved] = arr.splice(from, 1);
+      arr.splice(to, 0, moved);
+      await ctx.storage.updateTest(id, { definition });
+      return { id, section, from, to, total_steps: arr.length };
+    },
+  };
+
+  /**
    * Tool registry — array of all available tools
    * New tools can be added by appending to this array
    */
@@ -830,6 +1205,11 @@ Must provide either \`tag\` or \`testIds\`.
     listTestsTool,
     getTestTool,
     deleteTestTool,
+    updateTestTool,
+    addStepTool,
+    removeStepTool,
+    updateStepTool,
+    moveStepTool,
     listResultsTool,
     getResultTool,
     runSuiteTool,
