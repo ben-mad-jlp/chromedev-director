@@ -6,6 +6,7 @@
 
 import CDP from "chrome-remote-interface";
 import { OnEvent } from "./types.js";
+import { SessionManager } from "./session-manager.js";
 
 /**
  * Represents a mock network rule for intercepting and modifying network requests
@@ -57,17 +58,24 @@ export class CDPClient {
   private createTab: boolean;
   private ownedTargetId?: string;
   private eventUnsubscribers: Array<() => void> = [];
+  private sessionId?: string;
+  private sessionManager?: SessionManager;
 
   /**
    * Creates a new CDP client instance
    * @param port - The port on which Chrome DevTools Protocol server is listening
    * @param onEvent - Optional callback for emitting console and network events
-   * @param options - Optional configuration (createTab: create a new Chrome tab for isolation)
+   * @param options - Optional configuration
+   *   - createTab: create a new Chrome tab for isolation
+   *   - sessionId: persistent session identifier for tab reuse
+   *   - sessionManager: session registry for managing persistent tabs
    */
-  constructor(port: number, onEvent?: OnEvent, options?: { createTab?: boolean }) {
+  constructor(port: number, onEvent?: OnEvent, options?: { createTab?: boolean; sessionId?: string; sessionManager?: SessionManager }) {
     this.port = port;
     this.onEvent = onEvent;
     this.createTab = options?.createTab ?? false;
+    this.sessionId = options?.sessionId;
+    this.sessionManager = options?.sessionManager;
   }
 
   /**
@@ -133,6 +141,49 @@ export class CDPClient {
   }
 
   /**
+   * Finds or creates a persistent session tab
+   * Checks registry for existing tab, verifies it still exists, or creates new tab
+   * @param sessionId - The session identifier
+   * @returns The Chrome targetId for the session's tab
+   */
+  private async findOrCreateSessionTab(sessionId: string): Promise<string> {
+    // Check registry for existing tab
+    const registeredTargetId = this.sessionManager!.getTargetId(sessionId);
+
+    if (registeredTargetId) {
+      // Verify tab still exists
+      try {
+        const targets = await this.domains.Target.getTargets();
+        const targetInfos = targets.targetInfos || [];
+        const tabExists = targetInfos.some((t: any) => t.targetId === registeredTargetId);
+
+        if (tabExists) {
+          // Tab found, update last used timestamp
+          await this.sessionManager!.updateLastUsed(sessionId);
+          return registeredTargetId;
+        }
+      } catch (error) {
+        // Tab verification failed, will create new tab below
+        if (this.verbose) {
+          console.warn(`Could not verify existing tab for session ${sessionId}: ${error}`);
+        }
+      }
+    }
+
+    // Tab doesn't exist or verification failed, create new one
+    const { targetId } = await this.domains.Target.createTarget({
+      url: "about:blank",
+      newWindow: false,
+      background: false
+    });
+
+    // Store in registry
+    await this.sessionManager!.registerSession(sessionId, targetId);
+
+    return targetId;
+  }
+
+  /**
    * Connects to Chrome DevTools Protocol
    * Retrieves the first page target, attaches to it,
    * and enables necessary domains (Console, Network, Fetch)
@@ -182,15 +233,21 @@ export class CDPClient {
         Input,
       };
 
-      // Determine target: create a new tab or find an existing page target
+      // Determine target: 1) session tab, 2) create new tab, 3) find existing page
       let targetId: string;
 
-      if (this.createTab) {
+      // 1. Try to find session's existing tab
+      if (this.sessionId && this.sessionManager) {
+        targetId = await this.findOrCreateSessionTab(this.sessionId);
+      }
+      // 2. Create new tab if requested
+      else if (this.createTab) {
         const created = await Target.createTarget({ url: "about:blank" });
         targetId = created.targetId;
         this.ownedTargetId = targetId;
-      } else {
-        // Existing behavior: find the first page target
+      }
+      // 3. Fall back to first available page (backward compat)
+      else {
         const targets = await Target.getTargets();
         if (!targets.targetInfos || targets.targetInfos.length === 0) {
           throw new Error("No targets available");
@@ -1056,14 +1113,16 @@ export class CDPClient {
       // Clean up event listeners before closing
       this.cleanupEventListeners();
 
-      // Close the owned tab if we created one
-      if (this.ownedTargetId) {
+      // Only close owned tabs (non-session tabs)
+      // Session tabs persist indefinitely for debugging and reuse
+      if (this.ownedTargetId && !this.sessionId) {
         try {
           await this.domains.Target.closeTarget({ targetId: this.ownedTargetId });
         } catch { /* tab may already be closed */ }
         this.ownedTargetId = undefined;
       }
 
+      // Close connection but leave session tab open
       try {
         await this.client.close();
       } catch (error) {

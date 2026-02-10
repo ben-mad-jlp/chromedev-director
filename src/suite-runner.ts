@@ -159,7 +159,7 @@ export async function runSuite(
         }
 
         // Run the test (with createTab for tab isolation when concurrent)
-        testResult = await runTest(saved.definition, port, onTestEvent, projectRoot, undefined, useCreateTab);
+        testResult = await runTest(saved.definition, port, onTestEvent, projectRoot, undefined, useCreateTab, undefined, undefined);
 
         // Save the run result
         const savedRun = await storage.saveRun(options.storageDir, testId, testResult);

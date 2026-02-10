@@ -63,11 +63,11 @@ export interface TestDef {
  */
 export type StepDef =
   /** Execute JS in the page. `as` stores the result in `$vars.NAME`. Returns objects auto-serialized. */
-  | { label?: string; if?: string; capture_dom?: boolean; eval: string; as?: string }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; eval: string; as?: string }
   /** Fill an input field. Dispatches input+change events so React controlled components update. */
-  | { label?: string; if?: string; capture_dom?: boolean; fill: { selector: string; value: string } }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; fill: { selector: string; value: string } }
   /** Click an element by CSS selector. */
-  | { label?: string; if?: string; capture_dom?: boolean; click: { selector: string } }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; click: { selector: string } }
   /** Assert a JS expression is truthy. `retry` enables polling at interval until timeout. */
   | {
       label?: string;
@@ -77,13 +77,13 @@ export type StepDef =
       retry?: { interval: number; timeout: number };
     }
   /** Sleep for N milliseconds. Use after actions that trigger async renders (500-2000ms). */
-  | { label?: string; if?: string; capture_dom?: boolean; wait: number }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; wait: number }
   /** Poll for element existence by CSS selector. */
-  | { label?: string; if?: string; capture_dom?: boolean; wait_for: { selector: string; timeout?: number } }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; wait_for: { selector: string; timeout?: number } }
   /** Fail if console messages exist at given levels. Use `"warning"` not `"warn"` — CDP uses `"warning"`. */
-  | { label?: string; if?: string; capture_dom?: boolean; console_check: ("error" | "warn" | "warning" | "info" | "log" | "debug")[] }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; console_check: ("error" | "warn" | "warning" | "info" | "log" | "debug")[] }
   /** Fail if any 4xx/5xx network responses were captured. */
-  | { label?: string; if?: string; capture_dom?: boolean; network_check: boolean }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; network_check: boolean }
   /**
    * Intercept requests matching a glob pattern and return a mock response.
    * `match` uses glob: `*api/users*`. First matching rule wins — register specific patterns first.
@@ -102,19 +102,19 @@ export type StepDef =
       };
     }
   /** Execute another test by ID. Nested test's steps run inline; url/before/after/env are ignored. */
-  | { label?: string; if?: string; capture_dom?: boolean; run_test: string }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; run_test: string }
   /** Capture a PNG screenshot. Optionally store base64 in `$vars.NAME` via `as`. */
-  | { label?: string; if?: string; capture_dom?: boolean; screenshot: { as?: string } }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; screenshot: { as?: string } }
   /** Select an option in a native `<select>` dropdown. */
-  | { label?: string; if?: string; capture_dom?: boolean; select: { selector: string; value: string } }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; select: { selector: string; value: string } }
   /** Dispatch a keyboard event. `key` uses DOM key names (Enter, Tab, Escape, ArrowDown, etc.). */
-  | { label?: string; if?: string; capture_dom?: boolean; press_key: { key: string; modifiers?: ("ctrl" | "shift" | "alt" | "meta")[] } }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; press_key: { key: string; modifiers?: ("ctrl" | "shift" | "alt" | "meta")[] } }
   /** Hover over an element by CSS selector (dispatches mouseMoved). */
-  | { label?: string; if?: string; capture_dom?: boolean; hover: { selector: string } }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; hover: { selector: string } }
   /** Switch execution context to an iframe (by selector) or back to main frame (omit selector). */
-  | { label?: string; if?: string; capture_dom?: boolean; switch_frame: { selector?: string } }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; switch_frame: { selector?: string } }
   /** Configure auto-handling for future JS dialogs (alert/confirm/prompt). */
-  | { label?: string; if?: string; capture_dom?: boolean; handle_dialog: { action: "accept" | "dismiss"; text?: string } }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; handle_dialog: { action: "accept" | "dismiss"; text?: string } }
   /** Make a server-side HTTP request (Node fetch). Useful for API setup/teardown in before hooks. */
   | {
       label?: string;
@@ -142,17 +142,17 @@ export type StepDef =
       };
     }
   /** Fill an input and press Enter (barcode scanner pattern). */
-  | { label?: string; if?: string; capture_dom?: boolean; scan_input: { selector: string; value: string } }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; scan_input: { selector: string; value: string } }
   /** Fill multiple form fields in one step. */
-  | { label?: string; if?: string; capture_dom?: boolean; fill_form: { fields: Array<{ selector: string; value: string }> } }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; fill_form: { fields: Array<{ selector: string; value: string }> } }
   /** Scroll element into view. */
-  | { label?: string; if?: string; capture_dom?: boolean; scroll_to: { selector: string } }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; scroll_to: { selector: string } }
   /** Clear an input with proper React event dispatching. */
-  | { label?: string; if?: string; capture_dom?: boolean; clear_input: { selector: string } }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; clear_input: { selector: string } }
   /** Wait until text appears on page (polls at 200ms). `match`: "contains" (default), "exact", or "regex". */
-  | { label?: string; if?: string; capture_dom?: boolean; wait_for_text: { text: string; match?: "exact" | "contains" | "regex"; selector?: string; timeout?: number } }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; wait_for_text: { text: string; match?: "exact" | "contains" | "regex"; selector?: string; timeout?: number } }
   /** Wait until text disappears from page (polls at 200ms). `match`: "contains" (default), "exact", or "regex". */
-  | { label?: string; if?: string; capture_dom?: boolean; wait_for_text_gone: { text: string; match?: "exact" | "contains" | "regex"; selector?: string; timeout?: number } }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; wait_for_text_gone: { text: string; match?: "exact" | "contains" | "regex"; selector?: string; timeout?: number } }
   /** Assert page contains (or doesn't contain) specific text. `match`: "contains" (default), "exact", or "regex". */
   | {
       label?: string;
@@ -214,7 +214,7 @@ export type StepDef =
       };
     }
   /** Expand a collapsed navigation group by name. */
-  | { label?: string; if?: string; capture_dom?: boolean; expand_menu: { group: string } }
+  | { label?: string; if?: string; capture_dom?: boolean; comment?: string; expand_menu: { group: string } }
   /** Toggle a checkbox or switch by its label text. */
   | {
       label?: string;
@@ -236,6 +236,38 @@ export type StepDef =
     };
 
 /**
+ * Per-step execution trace — captures detailed information about each step's execution
+ */
+export interface StepTrace {
+  /** Step index in the steps array */
+  step_index: number;
+  /** Section where the step was executed */
+  section: 'before' | 'steps' | 'after';
+  /** Step type (eval, click, assert, etc.) */
+  step_type: string;
+  /** Human-readable label (from step.label or step.comment) */
+  label?: string;
+  /** Execution status */
+  status: 'passed' | 'failed' | 'skipped';
+  /** Time when step started (ms since test start) */
+  start_time_ms: number;
+  /** How long the step took to execute */
+  duration_ms: number;
+  /** Error message if failed */
+  error?: string;
+  /** Return value for eval steps */
+  result?: unknown;
+  /** DOM snapshot at this step (if capture_dom: true) */
+  dom_snapshot?: string;
+  /** Screenshot at this step (if failed or explicitly captured) */
+  screenshot?: string;
+  /** Console messages during this step */
+  console_messages?: Array<{ type: string; text: string }>;
+  /** Network requests during this step */
+  network_requests?: Array<{ url: string; method: string; status: number }>;
+}
+
+/**
  * Test execution result
  * Represents the outcome of a test run
  */
@@ -247,6 +279,8 @@ export type TestResult =
       console_log: Array<{ type: string; text: string; timestamp: number }>;
       network_log: Array<{ url: string; method: string; status: number; timestamp: number }>;
       dom_snapshots?: Record<number, string>;
+      /** Detailed per-step execution traces */
+      step_traces?: StepTrace[];
     }
   | {
       status: "failed";
@@ -263,6 +297,8 @@ export type TestResult =
       console_log: Array<{ type: string; text: string; timestamp: number }>;
       network_log: Array<{ url: string; method: string; status: number; timestamp: number }>;
       dom_snapshots?: Record<number, string>;
+      /** Detailed per-step execution traces */
+      step_traces?: StepTrace[];
     };
 
 /**

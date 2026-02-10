@@ -11,6 +11,11 @@ import { runTest } from "./step-runner.js";
 import { runSuite } from "./suite-runner.js";
 import { TestDef, TestResult, SavedTest, SuiteResult } from "./types.js";
 import * as storageModule from "./storage.js";
+import { generateTestFlowDiagram } from "./diagram-generator.js";
+import { analyzeVariableDependencies } from "./dependency-analyzer.js";
+import { validateEdit, formatValidationResults, hasErrors, type EditChange } from "./validation-rules.js";
+import { SessionManager } from "./session-manager.js";
+import { CDPClient } from "./cdp-client.js";
 
 /**
  * Storage interface for CRUD operations
@@ -162,7 +167,7 @@ const ListResultsInputSchema = z.object({
  * Zod schema for get_result tool input
  * Validates request to get a specific test run result
  */
-const SectionsEnum = z.enum(["console_log", "network_log", "dom_snapshot", "screenshot", "dom_snapshots", "step_definition"]);
+const SectionsEnum = z.enum(["console_log", "network_log", "dom_snapshot", "screenshot", "dom_snapshots", "step_definition", "step_traces"]);
 
 const GetResultInputSchema = z.object({
   testId: z.string(),
@@ -665,6 +670,7 @@ Same summary plus the requested large fields included in full.
 
 - Returns null if the result is not found
 - \`dom_snapshot\`, \`screenshot\`, and \`step_definition\` are only available for failed runs
+- \`step_traces\` provides detailed per-step execution information for debugging
 - Use \`list_results\` first to get available run IDs`,
     inputSchema: {
       type: "object" as const,
@@ -679,7 +685,7 @@ Same summary plus the requested large fields included in full.
         },
         sections: {
           type: "array",
-          items: { type: "string", enum: ["console_log", "network_log", "dom_snapshot", "screenshot", "dom_snapshots", "step_definition"] },
+          items: { type: "string", enum: ["console_log", "network_log", "dom_snapshot", "screenshot", "dom_snapshots", "step_definition", "step_traces"] },
           description: "Optional list of large sections to include. Without this, returns a compact summary.",
         },
       },
@@ -711,6 +717,7 @@ Same summary plus the requested large fields included in full.
           if (s === "console_log") base.console_log = r.console_log;
           if (s === "network_log") base.network_log = r.network_log;
           if (s === "dom_snapshots") base.dom_snapshots = r.dom_snapshots;
+          if (s === "step_traces") base.step_traces = r.step_traces;
           if (r.status === "failed") {
             if (s === "dom_snapshot") base.dom_snapshot = r.dom_snapshot;
             if (s === "screenshot") base.screenshot = r.screenshot;
@@ -762,7 +769,7 @@ Returns null content if no runs exist for the test.
         },
         sections: {
           type: "array",
-          items: { type: "string", enum: ["console_log", "network_log", "dom_snapshot", "screenshot", "dom_snapshots", "step_definition"] },
+          items: { type: "string", enum: ["console_log", "network_log", "dom_snapshot", "screenshot", "dom_snapshots", "step_definition", "step_traces"] },
           description: "Optional list of large sections to include. Without this, returns a compact summary.",
         },
       },
@@ -794,6 +801,7 @@ Returns null content if no runs exist for the test.
           if (s === "console_log") base.console_log = r.console_log;
           if (s === "network_log") base.network_log = r.network_log;
           if (s === "dom_snapshots") base.dom_snapshots = r.dom_snapshots;
+          if (s === "step_traces") base.step_traces = r.step_traces;
           if (r.status === "failed") {
             if (s === "dom_snapshot") base.dom_snapshot = r.dom_snapshot;
             if (s === "screenshot") base.screenshot = r.screenshot;
@@ -1029,6 +1037,34 @@ If the \`if\` expression throws, the step fails. If an eval step with \`as\` is 
 - CORS preflight (OPTIONS) is handled automatically — responds with 204 + CORS headers
 - Register mocks in \`before\` steps so they're active before page navigation
 
+## Session Management (Recommended for Multiple Claude Instances)
+
+When running tests from multiple Claude sessions simultaneously, use session management to prevent interference:
+
+1. **Register a session once** (via \`register_session\` tool):
+   \`\`\`json
+   { "sessionId": "my-work-session" }
+   \`\`\`
+
+2. **Run all tests with that sessionId**:
+   \`\`\`json
+   { "testId": "login-flow", "sessionId": "my-work-session" }
+   \`\`\`
+
+**Benefits:**
+- Each Claude session gets a dedicated, persistent Chrome tab
+- No interference between different Claude sessions
+- Tab persists after tests complete (for debugging)
+- Auto-recovery if tab is manually closed
+
+**Without sessions:** Tests may interfere when multiple Claude instances run simultaneously (they'll share the same Chrome tab by default).
+
+## Tab Behavior
+
+- **With sessionId**: Reuses persistent session tab (recommended)
+- **With createTab=true**: Creates new tab per test (isolated but slower)
+- **Without sessionId or createTab** (default): Reuses first available tab (may interfere if multiple sessions run tests)
+
 ## Tips
 
 - Always add \`wait\` steps (500-2000ms) after actions that trigger async renders
@@ -1056,6 +1092,14 @@ If the \`if\` expression throws, the step fails. If an eval step with \`as\` is 
         port: {
           type: "number",
           description: "Chrome DevTools Protocol port (default: 9222)",
+        },
+        sessionId: {
+          type: "string",
+          description: "Session identifier for persistent tab reuse. Register a session first using register_session tool. All tests with the same sessionId reuse the same Chrome tab (no interference with other sessions).",
+        },
+        createTab: {
+          type: "boolean",
+          description: "Create a new Chrome tab for this test (default: false). Ignored if sessionId is provided.",
         },
       },
       required: [],
@@ -1267,6 +1311,18 @@ Must provide either \`tag\` or \`testIds\`.
       const test = await ctx.storage.getTest(id);
       if (!test) throw new Error(`Test not found: ${id}`);
 
+      // Validate the edit before applying
+      const change: EditChange = {
+        action: 'add',
+        section,
+        index: index ?? (section === 'steps' ? test.definition.steps.length : (test.definition[section]?.length ?? 0)),
+        step: step as any
+      };
+      const validationResults = validateEdit(test.definition, change);
+      if (hasErrors(validationResults)) {
+        throw new Error(`Validation failed:\n${formatValidationResults(validationResults)}`);
+      }
+
       const definition = { ...test.definition };
       if (section !== "steps") {
         definition[section] = definition[section] ? [...definition[section]!] : [];
@@ -1280,7 +1336,16 @@ Must provide either \`tag\` or \`testIds\`.
       }
       arr.splice(insertAt, 0, step);
       await ctx.storage.updateTest(id, { definition });
-      return { id, section, index: insertAt, total_steps: arr.length };
+
+      // Include validation warnings in the response
+      const warnings = validationResults.filter(r => r.severity === 'warning').map(r => r.message);
+      return {
+        id,
+        section,
+        index: insertAt,
+        total_steps: arr.length,
+        ...(warnings.length > 0 && { warnings })
+      };
     },
   };
 
@@ -1326,6 +1391,17 @@ Must provide either \`tag\` or \`testIds\`.
       const { id, index, section } = parseResult.data;
       const test = await ctx.storage.getTest(id);
       if (!test) throw new Error(`Test not found: ${id}`);
+
+      // Validate the edit before applying
+      const change: EditChange = {
+        action: 'remove',
+        section,
+        index
+      };
+      const validationResults = validateEdit(test.definition, change);
+      if (hasErrors(validationResults)) {
+        throw new Error(`Validation failed:\n${formatValidationResults(validationResults)}`);
+      }
 
       const definition = { ...test.definition };
       if (section !== "steps") {
@@ -1470,6 +1546,457 @@ Must provide either \`tag\` or \`testIds\`.
   };
 
   /**
+   * Tool: get_test_flow_diagram
+   * Generate a Mermaid flowchart visualization of a test's structure
+   */
+  const getTestFlowDiagramTool: ToolDef = {
+    name: "get_test_flow_diagram",
+    description: `Generate a Mermaid flowchart diagram showing the test's structure, flow, and variable dependencies.
+
+## Purpose
+
+This tool helps AI understand test structure before making edits by providing a visual representation of:
+- Test flow (before → steps → after sections)
+- Variable dependencies (which steps set and use variables)
+- Control flow (conditionals, loops)
+- Step sequence and relationships
+
+## Input Parameters
+
+- \`id\` (string, required) — Test ID
+
+## Output
+
+Returns a Mermaid diagram in text format that can be rendered in markdown.
+
+## When to Use
+
+**IMPORTANT:** Call this tool BEFORE editing any test to understand its structure and avoid mistakes like:
+- Adding duplicate steps
+- Breaking variable dependencies
+- Placing steps in wrong sections
+
+## Example
+
+\`\`\`
+get_test_flow_diagram({ id: "login-test" })
+\`\`\`
+
+Returns:
+\`\`\`mermaid
+graph TD
+    N0([BEFORE SECTION])
+    N0 --> N1[Before[0]: Mock network<br/>📦 sets $vars.mockData]
+    N1 --> N2([MAIN STEPS])
+    N2 --> N3[Step[0]: Navigate]
+    N3 --> N4[Step[1]: Fill<br/>📥 uses $vars.mockData]
+    ...
+\`\`\``,
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Test ID" }
+      },
+      required: ["id"]
+    },
+    handler: async (args, ctx) => {
+      const { id } = args as { id: string };
+      const test = await ctx.storage.getTest(id);
+      if (!test) {
+        throw new Error(`Test not found: ${id}`);
+      }
+
+      const diagram = generateTestFlowDiagram(test);
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `# Test Flow Diagram: ${test.name}\n\n${diagram}`
+          }
+        ]
+      };
+    }
+  };
+
+  /**
+   * Tool: analyze_test_dependencies
+   * Analyze variable dependencies in a test
+   */
+  const analyzeTestDependenciesTool: ToolDef = {
+    name: "analyze_test_dependencies",
+    description: `Analyze which steps in a test produce and consume variables.
+
+## Purpose
+
+This tool helps prevent breaking changes by showing:
+- Which steps set variables (producers)
+- Which steps use variables (consumers)
+- Variables that are set but never used (potential cleanup)
+- Variables that are used but never set (errors)
+
+## Input Parameters
+
+- \`id\` (string, required) — Test ID
+
+## Output
+
+Returns a JSON object with dependency information:
+
+\`\`\`json
+{
+  "variables": {
+    "userId": {
+      "set_by": { "section": "steps", "index": 3, "step_label": "Evaluate: userId" },
+      "used_by": [
+        { "section": "steps", "index": 5, "step_label": "Load profile" },
+        { "section": "steps", "index": 8, "step_label": "Verify permissions" }
+      ]
+    }
+  },
+  "undefined_variables": [],
+  "unused_variables": ["tempVar"]
+}
+\`\`\`
+
+## When to Use
+
+**IMPORTANT:** Call this tool BEFORE removing or modifying steps that set variables (steps with \`as\` field).
+
+## Example
+
+\`\`\`
+analyze_test_dependencies({ id: "login-test" })
+\`\`\``,
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Test ID" }
+      },
+      required: ["id"]
+    },
+    handler: async (args, ctx) => {
+      const { id } = args as { id: string };
+      const test = await ctx.storage.getTest(id);
+      if (!test) {
+        throw new Error(`Test not found: ${id}`);
+      }
+
+      const analysis = analyzeVariableDependencies(test);
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(analysis, null, 2)
+          }
+        ]
+      };
+    }
+  };
+
+  /**
+   * Tool: validate_test_edit
+   * Validate a proposed edit to a test before applying it
+   */
+  const validateTestEditTool: ToolDef = {
+    name: "validate_test_edit",
+    description: `Validate a proposed edit to a test before applying it.
+
+## Purpose
+
+This tool validates proposed changes against a set of rules to prevent common mistakes:
+- **mock_network_placement**: Ensures mock_network steps are in "before" section
+- **variable_dependency_check**: Prevents removing steps that set variables used elsewhere
+- **duplicate_step_warning**: Warns if adding a step identical to an existing one
+- **index_bounds_check**: Ensures index is valid for the section
+- **conditional_step_structure**: Validates conditional steps have proper structure
+- **loop_structure_check**: Validates loop steps have proper configuration
+
+## Input Parameters
+
+- \`id\` (string, required) — Test ID
+- \`action\` (string, required) — One of: "add", "remove", "update", "move"
+- \`section\` (string, required) — One of: "before", "steps", "after"
+- \`index\` (number, optional) — Step index (required for remove/update/move)
+- \`step\` (object, optional) — Step definition (required for add/update)
+- \`to_index\` (number, optional) — Target index (required for move)
+
+## Output
+
+Returns validation results with errors and warnings:
+
+\`\`\`json
+{
+  "valid": false,
+  "errors": [
+    "[variable_dependency_check] Cannot remove step: it sets $vars.userId which is used by other steps"
+  ],
+  "warnings": []
+}
+\`\`\`
+
+## When to Use
+
+Call this tool BEFORE calling add_step, remove_step, update_step, or move_step to ensure the edit is valid.
+
+## Example
+
+\`\`\`
+validate_test_edit({
+  id: "login-test",
+  action: "remove",
+  section: "steps",
+  index: 3
+})
+\`\`\``,
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Test ID" },
+        action: { type: "string", enum: ["add", "remove", "update", "move"] },
+        section: { type: "string", enum: ["before", "steps", "after"] },
+        index: { type: "number", description: "Step index" },
+        step: { type: "object", description: "Step definition" },
+        to_index: { type: "number", description: "Target index for move" }
+      },
+      required: ["id", "action", "section"]
+    },
+    handler: async (args, ctx) => {
+      const { id, action, section, index, step, to_index } = args as {
+        id: string;
+        action: 'add' | 'remove' | 'update' | 'move';
+        section: 'before' | 'steps' | 'after';
+        index?: number;
+        step?: any;
+        to_index?: number;
+      };
+
+      const test = await ctx.storage.getTest(id);
+      if (!test) {
+        throw new Error(`Test not found: ${id}`);
+      }
+
+      const change: EditChange = {
+        action,
+        section,
+        index,
+        step,
+        to_index
+      };
+
+      const results = validateEdit(test.definition, change);
+
+      const errors = results.filter(r => !r.valid || r.severity === 'error');
+      const warnings = results.filter(r => r.valid && r.severity === 'warning');
+
+      const response = {
+        valid: !hasErrors(results),
+        errors: errors.map(r => r.message),
+        warnings: warnings.map(r => r.message)
+      };
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(response, null, 2)
+          }
+        ]
+      };
+    }
+  };
+
+  /**
+   * Tool: register_session
+   * Register a persistent Chrome tab for this Claude session
+   */
+  const registerSessionTool: ToolDef = {
+    name: "register_session",
+    description: `Register a persistent Chrome tab for this Claude session.
+
+## Purpose
+
+Creates a dedicated Chrome tab for your Claude session that persists across all tests. All tests you run will reuse this same tab, and the tab stays open after tests complete for debugging.
+
+**Benefits:**
+- No interference with other Claude sessions (each has dedicated tab)
+- No tab creation overhead per test (reuse within session)
+- Tab persists for inspection after tests complete
+- Automatic recovery if tab is manually closed
+
+## Input Parameters
+
+- \`sessionId\` (string, required) — Unique identifier for your session (e.g., "my-session", "session-1", "claude-a")
+
+## Output
+
+\`\`\`json
+{
+  "sessionId": "my-session",
+  "targetId": "E4F...",
+  "status": "created | existing",
+  "tabTitle": "Director Session: my-session"
+}
+\`\`\`
+
+## Workflow
+
+1. Call this once at the start of your Claude session
+2. Run tests with the same sessionId parameter
+3. All tests reuse the same tab
+4. Tab stays open when done (manually close when finished)
+
+## Example
+
+\`\`\`json
+{ "sessionId": "my-work-session" }
+\`\`\`
+
+Then run tests:
+\`\`\`json
+{ "testId": "login-flow", "sessionId": "my-work-session" }
+\`\`\`
+
+All tests with "my-work-session" use the same Chrome tab.
+
+## Notes
+
+- Tab title will be "Director Session: <sessionId>" for easy identification
+- If tab is manually closed or Chrome crashes, it's auto-recreated on next test
+- To use a different tab, register a new session with different sessionId`,
+
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        sessionId: {
+          type: "string",
+          description: "Unique identifier for this session"
+        }
+      },
+      required: ["sessionId"]
+    },
+
+    handler: async (args: Record<string, any>, ctx: { storage: Storage }): Promise<any> => {
+      const { sessionId } = args;
+
+      if (!sessionId || typeof sessionId !== 'string') {
+        throw new Error('sessionId must be a non-empty string');
+      }
+
+      // Initialize session manager
+      const sessionManager = new SessionManager(ctx.storage.storageDir);
+      await sessionManager.load();
+
+      // Check if session already exists
+      const existingTargetId = sessionManager.getTargetId(sessionId);
+      const wasExisting = !!existingTargetId;
+
+      // Create CDP client to find/create tab
+      const port = parseInt(process.env.CDP_PORT || '9222');
+      const client = new CDPClient(port, undefined, {
+        sessionId,
+        sessionManager
+      });
+
+      try {
+        // This will find existing tab or create new one
+        await client.connect('about:blank');
+        const targetId = sessionManager.getTargetId(sessionId);
+
+        if (!targetId) {
+          throw new Error('Failed to create or find session tab');
+        }
+
+        // Set tab title for visual identification
+        try {
+          await client.evaluate(`document.title = "Director Session: ${sessionId}"`);
+        } catch (titleError) {
+          // Non-fatal: tab title setting failed, but session is still registered
+          if (port === 9222) {
+            // Only warn if Chrome is likely running
+            console.warn(`Warning: Could not set tab title: ${titleError}`);
+          }
+        }
+
+        await client.close(); // Close connection but leave tab open
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                sessionId,
+                targetId,
+                status: wasExisting ? 'existing' : 'created',
+                tabTitle: `Director Session: ${sessionId}`
+              }, null, 2)
+            }
+          ]
+        };
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to register session: ${errorMsg}`);
+      }
+    }
+  };
+
+  /**
+   * Tool: list_sessions
+   * List all registered Claude sessions and their Chrome tabs
+   */
+  const listSessionsTool: ToolDef = {
+    name: "list_sessions",
+    description: `List all registered Claude sessions and their Chrome tabs.
+
+## Purpose
+
+View all active Claude sessions and their associated Chrome tab IDs.
+
+## Output
+
+\`\`\`json
+{
+  "sessions": [
+    { "sessionId": "session-a", "targetId": "...", "createdAt": "...", "lastUsed": "..." },
+    { "sessionId": "session-b", "targetId": "...", "createdAt": "...", "lastUsed": "..." }
+  ],
+  "count": 2
+}
+\`\`\`
+
+## Example
+
+\`\`\`json
+{}
+\`\`\``,
+
+    inputSchema: {
+      type: "object" as const,
+      properties: {}
+    },
+
+    handler: async (args: Record<string, any>, ctx: { storage: Storage }): Promise<any> => {
+      const sessionManager = new SessionManager(ctx.storage.storageDir);
+      await sessionManager.load();
+
+      const sessions = sessionManager.listSessions();
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({
+              sessions,
+              count: sessions.length
+            }, null, 2)
+          }
+        ]
+      };
+    }
+  };
+
+  /**
    * Tool registry — array of all available tools
    * New tools can be added by appending to this array
    */
@@ -1487,6 +2014,11 @@ Must provide either \`tag\` or \`testIds\`.
     getResultTool,
     getLatestResultTool,
     runSuiteTool,
+    getTestFlowDiagramTool,
+    analyzeTestDependenciesTool,
+    validateTestEditTool,
+    registerSessionTool,
+    listSessionsTool,
   ];
 
   /**
@@ -1507,9 +2039,19 @@ Must provide either \`tag\` or \`testIds\`.
       // Special handling for run_test (supports two modes: testId or inline test)
       if (name === "run_test") {
         try {
-          const { test, testId, port: portArg, inputs: inputValues } = args;
+          const { test, testId, port: portArg, inputs: inputValues, sessionId, createTab } = args;
           const port = (portArg as number) ?? 9222;
           const initialVars = inputValues as Record<string, unknown> | undefined;
+
+          // Initialize session manager if sessionId provided
+          let sessionManager: SessionManager | undefined;
+          if (sessionId && typeof sessionId === 'string') {
+            sessionManager = new SessionManager(storageDir);
+            await sessionManager.load();
+          }
+
+          // Determine createTab behavior
+          const shouldCreateTab = sessionId ? false : (createTab ?? false);
 
           // Determine which mode to use
           if (testId) {
@@ -1541,7 +2083,7 @@ Must provide either \`tag\` or \`testIds\`.
 
             // Run the loaded test definition
             const testData = savedTest.definition;
-            const result = await runTest(testData, port, undefined, undefined, initialVars);
+            const result = await runTest(testData, port, undefined, undefined, initialVars, shouldCreateTab, sessionId, sessionManager);
 
             // Save the result
             const testRun = await storage.saveRun(testId, result);
@@ -1570,7 +2112,7 @@ Must provide either \`tag\` or \`testIds\`.
             }
 
             const testData = parseResult.data as TestDef;
-            const result = await runTest(testData, port, undefined, undefined, initialVars);
+            const result = await runTest(testData, port, undefined, undefined, initialVars, shouldCreateTab, sessionId, sessionManager);
 
             return {
               content: [

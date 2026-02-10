@@ -7,6 +7,7 @@ import { TestDef, StepDef, TestResult, CDPClient as CDPClientInterface, OnEvent,
 import { interpolate, interpolateStep, markVarSynced, unmarkVarSynced } from "./env.js";
 import { CDPClient } from "./cdp-client.js";
 import { getTest } from "./storage.js";
+import { SessionManager } from "./session-manager.js";
 
 /**
  * Context for tracking nested test execution (cycle detection)
@@ -133,8 +134,12 @@ function getStepType(step: StepDef): string {
  * @param projectRoot - Project root for resolving nested test IDs (default: process.cwd())
  * @returns The test result with execution status, errors, and diagnostics
  */
-export async function runTest(testDef: TestDef, port: number = 9222, onEvent?: OnEvent, projectRoot: string = process.cwd(), initialVars?: Record<string, unknown>, createTab?: boolean): Promise<TestResult> {
-  const client = new CDPClient(port, undefined, { createTab: createTab ?? false });
+export async function runTest(testDef: TestDef, port: number = 9222, onEvent?: OnEvent, projectRoot: string = process.cwd(), initialVars?: Record<string, unknown>, createTab?: boolean, sessionId?: string, sessionManager?: SessionManager): Promise<TestResult> {
+  const client = new CDPClient(port, undefined, {
+    createTab: createTab ?? false,
+    sessionId,
+    sessionManager
+  });
   const vars: Record<string, unknown> = { ...initialVars };
   const startTime = Date.now();
   const testTimeout = testDef.timeout ?? 30000;

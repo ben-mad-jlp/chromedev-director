@@ -441,7 +441,7 @@ export function createApiServer(options: GuiOptions): { app: Hono; injectWebSock
         };
 
         // Step 6: Call runTest() with onEvent handler and merged inputs
-        const result = await runTest(test.definition, cdpPortOverride, onEventCallback, config.projectRoot, mergedInputs);
+        const result = await runTest(test.definition, cdpPortOverride, onEventCallback, config.projectRoot, mergedInputs, undefined, undefined, undefined);
 
         // Step 7: Save result to storage
         const savedRun = await storage.saveRun(config.storageDir, testId, result);
