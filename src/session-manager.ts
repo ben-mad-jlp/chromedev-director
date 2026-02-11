@@ -93,6 +93,9 @@ export class SessionManager {
    * List all registered sessions
    */
   listSessions(): Array<{ sessionId: string; targetId: string; createdAt: string; lastUsed: string }> {
+    if (!this.registry || !this.registry.sessions) {
+      return [];
+    }
     return Object.entries(this.registry.sessions).map(([sessionId, data]) => ({
       sessionId,
       ...data

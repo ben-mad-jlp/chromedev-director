@@ -15,6 +15,9 @@ import { OnEvent, TestDef, TestResult, RunEvent, SavedTest, TestRun, InputDef, S
 import * as storage from './storage.js';
 import { runTest } from './step-runner.js';
 import { runSuite, OnSuiteEvent, SuiteEvent } from './suite-runner.js';
+import { SessionManager } from './session-manager.js';
+import { CDPClient } from './cdp-client.js';
+import { generateTestFlowDiagram } from './diagram-generator.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -84,6 +87,15 @@ export function createApiServer(options: GuiOptions): { app: Hono; injectWebSock
 
   // WebSocket client tracking
   const clients = new Set<any>();
+
+  // Initialize SessionManager singleton
+  let sessionManager: SessionManager | null = null;
+  function getSessionManager(): SessionManager {
+    if (!sessionManager) {
+      sessionManager = new SessionManager(config.storageDir);
+    }
+    return sessionManager;
+  }
 
   /**
    * Broadcast a message to all connected WebSocket clients
@@ -230,6 +242,27 @@ export function createApiServer(options: GuiOptions): { app: Hono; injectWebSock
   });
 
   /**
+   * GET /api/tests/:testId/flow-diagram — Get Mermaid diagram
+   * IMPORTANT: Must come before /api/tests/:id to avoid route conflict
+   */
+  app.get('/api/tests/:testId/flow-diagram', async (c: any) => {
+    try {
+      const testId = c.req.param('testId');
+      const test = await storage.getTest(config.storageDir, testId);
+
+      if (!test) {
+        return c.json({ error: 'Test not found' }, 404);
+      }
+
+      const diagram = generateTestFlowDiagram(test);
+      return c.json({ diagram });
+    } catch (error: any) {
+      console.error('Failed to generate flow diagram:', error);
+      return c.json({ error: error.message }, 500);
+    }
+  });
+
+  /**
    * GET /api/tests/:id — Get a specific test
    */
   app.get('/api/tests/:id', async (c: any) => {
@@ -309,15 +342,107 @@ export function createApiServer(options: GuiOptions): { app: Hono; injectWebSock
     try {
       const testId = c.req.param('testId');
       const runId = c.req.param('runId');
+      const sections = c.req.query('sections'); // Add query param for selective data
 
       const run = await storage.getRun(config.storageDir, testId, runId);
       if (!run) {
         return c.json({ error: `Result not found: ${runId}` }, 404);
       }
 
+      // Filter response based on requested sections (inverse filtering — only include what's requested)
+      if (sections) {
+        const requestedSections = (sections as string).split(',');
+        const filteredRun = { ...run };
+        const r = filteredRun.result as any;
+
+        const largeFields = ['console_log', 'network_log', 'dom_snapshot', 'screenshot', 'dom_snapshots', 'step_definition', 'step_traces'];
+        for (const field of largeFields) {
+          if (!requestedSections.includes(field) && r[field] != null) {
+            delete r[field];
+          }
+        }
+
+        return c.json({ run: filteredRun });
+      }
+
       return c.json({ run });
     } catch (error) {
       throw error;
+    }
+  });
+
+  /**
+   * POST /api/sessions — Register new session
+   */
+  app.post('/api/sessions', async (c: any) => {
+    try {
+      const body = await c.req.json() as any;
+      const { sessionId } = body;
+
+      if (!sessionId || typeof sessionId !== 'string') {
+        return c.json({ error: 'sessionId must be a non-empty string' }, 400);
+      }
+
+      const manager = getSessionManager();
+      await manager.load();
+
+      // Check if already registered
+      const existing = manager.getTargetId(sessionId);
+      if (existing) {
+        const sessions = manager.listSessions();
+        const session = sessions.find(s => s.sessionId === sessionId);
+        return c.json({ session, status: 'existing' });
+      }
+
+      // Register via CDP
+      const port = options.cdpPort;
+      const client = new CDPClient(port, undefined, {
+        sessionId,
+        sessionManager: manager
+      });
+
+      await client.connect('about:blank');
+      const targetId = manager.getTargetId(sessionId);
+      await client.close();
+
+      const sessions = manager.listSessions();
+      const session = sessions.find(s => s.sessionId === sessionId);
+
+      return c.json({ session, status: 'created' });
+    } catch (error: any) {
+      console.error('Failed to register session:', error);
+      return c.json({ error: error.message }, 500);
+    }
+  });
+
+  /**
+   * GET /api/sessions — List all sessions
+   */
+  app.get('/api/sessions', async (c: any) => {
+    try {
+      const manager = getSessionManager();
+      await manager.load();
+      const sessions = manager.listSessions();
+      return c.json({ sessions });
+    } catch (error: any) {
+      console.error('Failed to list sessions:', error);
+      return c.json({ error: error.message }, 500);
+    }
+  });
+
+  /**
+   * DELETE /api/sessions/:sessionId — Delete session
+   */
+  app.delete('/api/sessions/:sessionId', async (c: any) => {
+    try {
+      const sessionId = c.req.param('sessionId');
+      const manager = getSessionManager();
+      await manager.load();
+      await manager.unregisterSession(sessionId);
+      return c.json({ success: true });
+    } catch (error: any) {
+      console.error('Failed to delete session:', error);
+      return c.json({ error: error.message }, 500);
     }
   });
 
@@ -343,6 +468,7 @@ export function createApiServer(options: GuiOptions): { app: Hono; injectWebSock
       const testId = c.req.param('id');
       const body = await c.req.json() as any;
       const cdpPortOverride = body.port ?? options.cdpPort;
+      const sessionId = body.sessionId; // Add sessionId extraction
 
       // Step 1: Check activeRun mutex — prevent concurrent execution
       if (activeRun) {
@@ -385,6 +511,13 @@ export function createApiServer(options: GuiOptions): { app: Hono; injectWebSock
       } else if (body.inputs) {
         // No inputDefs but caller sent inputs — pass them through
         mergedInputs = body.inputs;
+      }
+
+      // Initialize session manager if sessionId provided
+      let sessionManagerInstance: SessionManager | undefined;
+      if (sessionId) {
+        sessionManagerInstance = getSessionManager();
+        await sessionManagerInstance.load();
       }
 
       // Step 3: Generate runId and set activeRun
@@ -440,8 +573,18 @@ export function createApiServer(options: GuiOptions): { app: Hono; injectWebSock
           // Console and network events are not broadcasted in the current design
         };
 
-        // Step 6: Call runTest() with onEvent handler and merged inputs
-        const result = await runTest(test.definition, cdpPortOverride, onEventCallback, config.projectRoot, mergedInputs, undefined, undefined, undefined);
+        // Step 6: Call runTest() with onEvent handler, merged inputs, and session
+        const shouldCreateTab = false; // Don't create tabs in GUI
+        const result = await runTest(
+          test.definition,
+          cdpPortOverride,
+          onEventCallback,
+          config.projectRoot,
+          mergedInputs,
+          shouldCreateTab,
+          sessionId,
+          sessionManagerInstance
+        );
 
         // Step 7: Save result to storage
         const savedRun = await storage.saveRun(config.storageDir, testId, result);

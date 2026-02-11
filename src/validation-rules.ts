@@ -184,7 +184,7 @@ export const defaultRules: ValidationRule[] = [
 
         // Check if the conditional step has at least one action
         const hasAction = Object.keys(step).some(key =>
-          key !== 'if' && key !== 'as' && key !== 'comment'
+          key !== 'if' && key !== 'as' && key !== 'comment' && key !== 'label' && key !== 'capture_dom'
         );
 
         if (!hasAction) {

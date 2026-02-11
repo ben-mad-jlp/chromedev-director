@@ -60,6 +60,7 @@ export class CDPClient {
   private eventUnsubscribers: Array<() => void> = [];
   private sessionId?: string;
   private sessionManager?: SessionManager;
+  private sessionTabCreated: boolean = false;
 
   /**
    * Creates a new CDP client instance
@@ -179,6 +180,7 @@ export class CDPClient {
 
     // Store in registry
     await this.sessionManager!.registerSession(sessionId, targetId);
+    this.sessionTabCreated = true;
 
     return targetId;
   }
@@ -213,6 +215,7 @@ export class CDPClient {
       this.networkRequestTimes.clear();
       this.currentExecutionContextId = undefined;
       this.dialogHandler = undefined;
+      this.sessionTabCreated = false;
 
       // Connect to the Chrome DevTools Protocol
       this.client = await CDP({ port: this.port });
@@ -280,6 +283,19 @@ export class CDPClient {
         patterns: [{ urlPattern: "*" }],
       });
 
+      // If a session tab was just created (new or recovered), set its title
+      if (this.sessionTabCreated && this.sessionId) {
+        try {
+          await Runtime.evaluate({
+            expression: `document.title = "Director Session: ${this.sessionId}"`,
+            returnByValue: true,
+          });
+        } catch {
+          // Non-fatal: title setting may fail on about:blank in some configurations
+        }
+        this.sessionTabCreated = false;
+      }
+
       // Set up listeners for console messages
       const consoleHandler = this.wrapEventListener((message: any) => {
         const consoleMessage = message.message;
@@ -324,14 +340,7 @@ export class CDPClient {
         const requestId = response.requestId;
         const responseUrl = response.response.url;
         const responseStatus = response.response.status;
-        const responseMethod = response.response.requestHeaders
-          ? Object.keys(response.response.requestHeaders).length > 0
-            ? "GET" // Default if not available in response
-            : "GET"
-          : "GET";
-
-        // Get actual method from request info if available
-        let method = responseMethod;
+        let method = "GET";
         if (response.response.method) {
           method = response.response.method;
         }

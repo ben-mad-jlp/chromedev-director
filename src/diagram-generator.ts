@@ -15,6 +15,9 @@ export function generateTestFlowDiagram(test: SavedTest): string {
 
   // Helper to add a node and connect it to the previous node
   const addNode = (id: string, label: string, shape: 'rect' | 'diamond' | 'round' | 'callout' = 'rect') => {
+    // Wrap label in double quotes to safely handle special characters
+    const quotedLabel = `"${label}"`;
+
     const shapeMap = {
       rect: (text: string) => `[${text}]`,
       diamond: (text: string) => `{${text}}`,
@@ -22,7 +25,7 @@ export function generateTestFlowDiagram(test: SavedTest): string {
       callout: (text: string) => `[[${text}]]`
     };
 
-    lines.push(`    ${id}${shapeMap[shape](label)}`);
+    lines.push(`    ${id}${shapeMap[shape](quotedLabel)}`);
 
     if (prevNode) {
       lines.push(`    ${prevNode} --> ${id}`);
@@ -46,16 +49,23 @@ export function generateTestFlowDiagram(test: SavedTest): string {
     return { sets, uses };
   };
 
+  // Helper to escape quotes in labels (only quotes need escaping when using quoted labels)
+  const escapeQuotes = (text: string): string => {
+    // Escape double quotes by replacing them with single quotes (simpler and more reliable)
+    return text.replace(/"/g, "'");
+  };
+
   // Helper to format step label with variable annotations and comments
   const formatStepLabel = (step: StepDef, index: number, section: string): string => {
     const varInfo = getVariableInfo(step);
     const stepType = getStepType(step);
 
+    // Use original square brackets - they'll be safe inside quoted labels
     let label = `${section}[${index}]: ${stepType}`;
 
     // Add comment if present
     if ('comment' in step && step.comment) {
-      label += `<br/>💬 ${step.comment}`;
+      label += `<br/>💬 ${escapeQuotes(step.comment)}`;
     }
 
     // Add variable annotations
@@ -71,7 +81,8 @@ export function generateTestFlowDiagram(test: SavedTest): string {
       label += `<br/>${annotations.join('<br/>')}`;
     }
 
-    return label;
+    // Escape quotes in the final label
+    return escapeQuotes(label);
   };
 
   // Helper to get human-readable step type
@@ -114,9 +125,7 @@ export function generateTestFlowDiagram(test: SavedTest): string {
 
     for (let i = 0; i < test.definition.before.length; i++) {
       const step = test.definition.before[i];
-      const nodeIdStr = getNodeId();
-      const label = formatStepLabel(step, i, 'Before');
-      prevNode = addNode(nodeIdStr, label);
+      prevNode = processStep(step, i, 'Before', addNode, getNodeId, formatStepLabel, escapeQuotes, lines, prevNode);
     }
   }
 
@@ -128,7 +137,7 @@ export function generateTestFlowDiagram(test: SavedTest): string {
 
     for (let i = 0; i < test.definition.steps.length; i++) {
       const step = test.definition.steps[i];
-      prevNode = processStep(step, i, 'Step', addNode, getNodeId, formatStepLabel, lines);
+      prevNode = processStep(step, i, 'Step', addNode, getNodeId, formatStepLabel, escapeQuotes, lines, prevNode);
     }
   }
 
@@ -140,9 +149,7 @@ export function generateTestFlowDiagram(test: SavedTest): string {
 
     for (let i = 0; i < test.definition.after.length; i++) {
       const step = test.definition.after[i];
-      const nodeIdStr = getNodeId();
-      const label = formatStepLabel(step, i, 'After');
-      prevNode = addNode(nodeIdStr, label);
+      prevNode = processStep(step, i, 'After', addNode, getNodeId, formatStepLabel, escapeQuotes, lines, prevNode);
     }
   }
 
@@ -171,19 +178,27 @@ function processStep(
   addNode: (id: string, label: string, shape?: 'rect' | 'diamond' | 'round' | 'callout') => string,
   getNodeId: () => string,
   formatStepLabel: (step: StepDef, index: number, section: string) => string,
-  lines: string[]
+  escapeQuotes: (text: string) => string,
+  lines: string[],
+  prevNode: string | null
 ): string {
   // Handle conditional steps
   if ('if' in step) {
     const condId = getNodeId();
-    const condLabel = `if ${step.if}`;
-    lines.push(`    ${condId}{${condLabel}}`);
+    const condLabel = escapeQuotes(`if ${step.if}`);
+    lines.push(`    ${condId}{"${condLabel}"}`);
+
+    // Connect condition to previous node
+    if (prevNode) {
+      lines.push(`    ${prevNode} --> ${condId}`);
+    }
 
     // For now, just show the condition and the step
     // In a full implementation, we'd need to show branches
     const stepId = getNodeId();
     const label = formatStepLabel(step, index, section);
-    lines.push(`    ${condId} -->|true| ${stepId}[${label}]`);
+    lines.push(`    ${stepId}["${label}"]`);
+    lines.push(`    ${condId} -->|true| ${stepId}`);
     lines.push(`    ${condId} -->|false| ${stepId}`);
     return stepId;
   }

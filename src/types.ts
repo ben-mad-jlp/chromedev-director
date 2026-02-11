@@ -73,6 +73,7 @@ export type StepDef =
       label?: string;
       if?: string;
       capture_dom?: boolean;
+      comment?: string;
       assert: string;
       retry?: { interval: number; timeout: number };
     }

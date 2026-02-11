@@ -6,15 +6,19 @@ import { RunButton, type RunButtonState } from '@/features/runs/RunButton';
 import LogPanel from '@/features/runs/LogPanel';
 import RunInputsDialog from '@/components/RunInputsDialog';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import SessionSelector from '@/components/SessionSelector';
 import StepsTab from './StepsTab';
 import ResultsTab from '@/features/history/ResultsTab';
+import TraceTab from '@/features/history/TraceTab';
+import FlowDiagramTab from './FlowDiagramTab';
 import type { SavedTest } from '@/lib/types';
 import * as api from '@/lib/api';
 import { useRunStore } from '@/stores/run-store';
 import { useTestStore } from '@/stores/test-store';
+import { useSessionStore } from '@/stores/session-store';
 import { getChromeStatus } from '@/lib/api';
 
-type TabId = 'steps' | 'results';
+type TabId = 'steps' | 'results' | 'trace' | 'flow';
 
 export interface TestDetailProps {
   // Component can accept test directly if needed (for composition)
@@ -65,6 +69,11 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
   const { updateTestRemote, deleteTestRemote } = useTestStore((state) => ({
     updateTestRemote: state.updateTestRemote,
     deleteTestRemote: state.deleteTestRemote,
+  }));
+
+  // Session store
+  const { selectedSessionId } = useSessionStore((state) => ({
+    selectedSessionId: state.selectedSessionId,
   }));
 
   // Chrome status for RunButton state
@@ -177,7 +186,7 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
     if (!test) return;
 
     try {
-      await api.runTest(test.id, inputValues);
+      await api.runTest(test.id, inputValues, selectedSessionId ?? undefined);
     } catch (err) {
       const message =
         err instanceof api.ApiError
@@ -378,8 +387,9 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
             </p>
           </div>
 
-          {/* Refresh + Delete + Run buttons */}
+          {/* Session selector + Refresh + Delete + Run buttons */}
           <div className="flex-shrink-0 flex items-center gap-2">
+            <SessionSelector className="w-64" disabled={isRunning} />
             <button
               onClick={fetchTest}
               className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
@@ -407,7 +417,7 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
         {/* Tab buttons */}
         <div className="border-b border-gray-200 bg-white">
           <div className="px-6 flex gap-8">
-            {(['steps', 'results'] as TabId[]).map((tabId) => (
+            {(['steps', 'results', 'trace', 'flow'] as TabId[]).map((tabId) => (
               <button
                 key={tabId}
                 onClick={() => setActiveTab(tabId)}
@@ -417,7 +427,7 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
                     : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
                 }`}
               >
-                {tabId.charAt(0).toUpperCase() + tabId.slice(1)}
+                {tabId === 'flow' ? 'Flow Diagram' : tabId.charAt(0).toUpperCase() + tabId.slice(1)}
               </button>
             ))}
           </div>
@@ -430,6 +440,12 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
           )}
           {activeTab === 'results' && (
             <ResultsTab testId={test.id} />
+          )}
+          {activeTab === 'trace' && (
+            <TraceTab testId={test.id} />
+          )}
+          {activeTab === 'flow' && (
+            <FlowDiagramTab testId={test.id} />
           )}
         </div>
       </div>

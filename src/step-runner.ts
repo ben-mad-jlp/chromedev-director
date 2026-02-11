@@ -605,7 +605,7 @@ export async function runSteps(
       );
 
       // Store result in vars if step has `as` field (not skipped, not failed)
-      if ("as" in step && step.as && result.success && !result.skipped) {
+      if ("as" in step && step.as && "value" in result && result.success && !result.skipped) {
         vars[step.as] = result.value;
       }
       // http_request stores 'as' inside http_request object

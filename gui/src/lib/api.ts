@@ -156,14 +156,17 @@ export async function listResults(testId: string): Promise<TestRun[]> {
  * Get a specific test run
  * @param testId - Test ID
  * @param runId - Run ID
+ * @param sections - Optional comma-separated sections to include (e.g., 'step_traces')
  * @returns TestRun object
  */
 export async function getResult(
   testId: string,
-  runId: string
+  runId: string,
+  sections?: string[]
 ): Promise<TestRun> {
+  const query = sections ? `?sections=${sections.join(',')}` : '';
   const data = await apiFetch<{ run: TestRun }>(
-    `/tests/${encodeURIComponent(testId)}/results/${encodeURIComponent(runId)}`,
+    `/tests/${encodeURIComponent(testId)}/results/${encodeURIComponent(runId)}${query}`,
     {
       method: "GET",
     }
@@ -175,14 +178,23 @@ export async function getResult(
  * Run a test by ID (triggers async execution on the server)
  * @param testId - Test ID to run
  * @param inputs - Optional runtime input values to seed as $vars
+ * @param sessionId - Optional session ID for persistent Chrome tab
  * @returns Object with runId for tracking the test execution
  */
-export async function runTest(testId: string, inputs?: Record<string, unknown>): Promise<{ runId: string }> {
+export async function runTest(
+  testId: string,
+  inputs?: Record<string, unknown>,
+  sessionId?: string
+): Promise<{ runId: string }> {
+  const body: any = {};
+  if (inputs) body.inputs = inputs;
+  if (sessionId) body.sessionId = sessionId;
+
   return apiFetch<{ runId: string; result: TestRun }>(
     `/tests/${encodeURIComponent(testId)}/run`,
     {
       method: "POST",
-      body: inputs ? { inputs } : {},
+      body,
     }
   );
 }
@@ -225,4 +237,62 @@ export async function switchProject(projectRoot: string): Promise<{ projectRoot:
     method: "PUT",
     body: { projectRoot },
   });
+}
+
+/**
+ * Register a new Chrome session
+ * @param sessionId - Unique session identifier
+ * @returns SessionInfo object with session details
+ */
+export async function registerSession(sessionId: string): Promise<import('./types.js').SessionInfo> {
+  const data = await apiFetch<{ session: import('./types.js').SessionInfo; status: string }>(
+    "/sessions",
+    {
+      method: "POST",
+      body: { sessionId },
+    }
+  );
+  return data.session;
+}
+
+/**
+ * List all registered Chrome sessions
+ * @returns Array of SessionInfo objects
+ */
+export async function listSessions(): Promise<import('./types.js').SessionInfo[]> {
+  const data = await apiFetch<{ sessions: import('./types.js').SessionInfo[] }>(
+    "/sessions",
+    {
+      method: "GET",
+    }
+  );
+  return data.sessions;
+}
+
+/**
+ * Delete a Chrome session
+ * @param sessionId - Session ID to delete
+ */
+export async function deleteSession(sessionId: string): Promise<void> {
+  await apiFetch<{ success: boolean }>(
+    `/sessions/${encodeURIComponent(sessionId)}`,
+    {
+      method: "DELETE",
+    }
+  );
+}
+
+/**
+ * Get Mermaid flow diagram for a test
+ * @param testId - Test ID
+ * @returns Mermaid diagram syntax as string
+ */
+export async function getFlowDiagram(testId: string): Promise<string> {
+  const data = await apiFetch<{ diagram: string }>(
+    `/tests/${encodeURIComponent(testId)}/flow-diagram`,
+    {
+      method: "GET",
+    }
+  );
+  return data.diagram;
 }

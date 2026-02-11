@@ -1178,6 +1178,13 @@ export const StepCard: React.FC<StepCardProps> = ({
             <span className="font-medium text-sm break-words">{label}</span>
           </div>
 
+          {/* Step comment/annotation */}
+          {'comment' in step && step.comment && (
+            <div className="mt-2 text-xs text-gray-600 italic border-l-2 border-gray-300 pl-2">
+              💬 {step.comment}
+            </div>
+          )}
+
           {/* Collapsed: truncated details */}
           {!isExpanded && details}
 

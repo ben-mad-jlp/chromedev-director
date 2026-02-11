@@ -6,6 +6,7 @@
 import { SuiteResult, SuiteTestResult, OnEvent, TestResult } from "./types.js";
 import { runTest } from "./step-runner.js";
 import * as storage from "./storage.js";
+import { SessionManager } from "./session-manager.js";
 
 /**
  * Simple counting semaphore for limiting concurrency
@@ -116,8 +117,11 @@ export async function runSuite(
   // Emit suite:start
   emitSuiteEvent(onSuiteEvent, { type: "suite:start", total: tests.length });
 
-  // Use createTab when concurrency > 1 so each test gets its own Chrome tab
-  const useCreateTab = concurrency > 1;
+  // Initialize session manager for concurrent test isolation
+  const sessionManager = new SessionManager(options.storageDir);
+  await sessionManager.load();
+
+  // When concurrency > 1, each test gets its own session ID for tab isolation
   const semaphore = new Semaphore(concurrency);
 
   const promises: Promise<void>[] = [];
@@ -158,8 +162,10 @@ export async function runSuite(
           throw new Error(`Test not found: ${testId}`);
         }
 
-        // Run the test (with createTab for tab isolation when concurrent)
-        testResult = await runTest(saved.definition, port, onTestEvent, projectRoot, undefined, useCreateTab, undefined, undefined);
+        // Run the test with unique session ID for tab isolation when concurrent
+        // Use suite-specific session IDs to avoid interference between concurrent tests
+        const sessionId = concurrency > 1 ? `suite-${testId}-${Date.now()}` : `suite-sequential-${Date.now()}`;
+        testResult = await runTest(saved.definition, port, onTestEvent, projectRoot, undefined, concurrency > 1, sessionId, sessionManager);
 
         // Save the run result
         const savedRun = await storage.saveRun(options.storageDir, testId, testResult);

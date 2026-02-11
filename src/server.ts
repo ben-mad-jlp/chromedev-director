@@ -1037,33 +1037,35 @@ If the \`if\` expression throws, the step fails. If an eval step with \`as\` is 
 - CORS preflight (OPTIONS) is handled automatically — responds with 204 + CORS headers
 - Register mocks in \`before\` steps so they're active before page navigation
 
-## Session Management (Recommended for Multiple Claude Instances)
+## Session Management (Automatic)
 
-When running tests from multiple Claude sessions simultaneously, use session management to prevent interference:
+**All tests now automatically use session management to prevent interference between Claude instances.**
 
-1. **Register a session once** (via \`register_session\` tool):
+If you don't provide a \`sessionId\`, one will be auto-generated (e.g., \`auto-1707334567890\`). This ensures:
+- Each test run is isolated from other Claude instances
+- No interference when multiple Claude sessions run tests simultaneously
+- Auto-recovery if tab is manually closed
+
+**To reuse the same tab across multiple tests** (recommended for debugging):
+1. Call \`register_session\` once with a memorable ID:
    \`\`\`json
    { "sessionId": "my-work-session" }
    \`\`\`
 
-2. **Run all tests with that sessionId**:
+2. Run all tests with that \`sessionId\`:
    \`\`\`json
    { "testId": "login-flow", "sessionId": "my-work-session" }
    \`\`\`
 
-**Benefits:**
-- Each Claude session gets a dedicated, persistent Chrome tab
-- No interference between different Claude sessions
-- Tab persists after tests complete (for debugging)
-- Auto-recovery if tab is manually closed
+**Benefits of explicit sessionId:**
+- Tab persists across all your tests
+- Easy to identify in Chrome ("Director Session: my-work-session")
+- Better for debugging (inspect tab after test completes)
 
-**Without sessions:** Tests may interfere when multiple Claude instances run simultaneously (they'll share the same Chrome tab by default).
-
-## Tab Behavior
-
-- **With sessionId**: Reuses persistent session tab (recommended)
-- **With createTab=true**: Creates new tab per test (isolated but slower)
-- **Without sessionId or createTab** (default): Reuses first available tab (may interfere if multiple sessions run tests)
+**Auto-generated sessions:**
+- Each test run gets a unique session
+- Prevents any possibility of interference
+- Tab is auto-cleaned up after test completes
 
 ## Tips
 
@@ -1095,11 +1097,7 @@ When running tests from multiple Claude sessions simultaneously, use session man
         },
         sessionId: {
           type: "string",
-          description: "Session identifier for persistent tab reuse. Register a session first using register_session tool. All tests with the same sessionId reuse the same Chrome tab (no interference with other sessions).",
-        },
-        createTab: {
-          type: "boolean",
-          description: "Create a new Chrome tab for this test (default: false). Ignored if sessionId is provided.",
+          description: "Session identifier for persistent tab reuse across multiple tests. If not provided, an auto-generated session ID will be created for this test run (e.g., 'auto-1707334567890'). Use an explicit sessionId to reuse the same tab across multiple tests for easier debugging.",
         },
       },
       required: [],
@@ -1608,14 +1606,7 @@ graph TD
 
       const diagram = generateTestFlowDiagram(test);
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `# Test Flow Diagram: ${test.name}\n\n${diagram}`
-          }
-        ]
-      };
+      return { name: test.name, diagram };
     }
   };
 
@@ -1684,14 +1675,7 @@ analyze_test_dependencies({ id: "login-test" })
 
       const analysis = analyzeVariableDependencies(test);
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(analysis, null, 2)
-          }
-        ]
-      };
+      return analysis;
     }
   };
 
@@ -1790,81 +1774,75 @@ validate_test_edit({
       const errors = results.filter(r => !r.valid || r.severity === 'error');
       const warnings = results.filter(r => r.valid && r.severity === 'warning');
 
-      const response = {
+      return {
         valid: !hasErrors(results),
         errors: errors.map(r => r.message),
         warnings: warnings.map(r => r.message)
-      };
-
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(response, null, 2)
-          }
-        ]
       };
     }
   };
 
   /**
    * Tool: register_session
-   * Register a persistent Chrome tab for this Claude session
+   * Pre-register a persistent Chrome tab for this Claude session (optional)
    */
   const registerSessionTool: ToolDef = {
     name: "register_session",
-    description: `Register a persistent Chrome tab for this Claude session.
+    description: `Pre-register a persistent Chrome tab with a memorable session ID.
 
 ## Purpose
 
-Creates a dedicated Chrome tab for your Claude session that persists across all tests. All tests you run will reuse this same tab, and the tab stays open after tests complete for debugging.
+**NOTE: Session management is now automatic.** All test runs automatically use sessions to prevent interference.
 
-**Benefits:**
-- No interference with other Claude sessions (each has dedicated tab)
-- No tab creation overhead per test (reuse within session)
-- Tab persists for inspection after tests complete
-- Automatic recovery if tab is manually closed
+This tool is **optional** and only needed if you want to:
+1. Use a **memorable session ID** (e.g., "my-work-session" instead of "auto-1707334567890")
+2. **Pre-create the tab** before running tests (faster first test)
+3. Keep the **same tab across multiple tests** for easier debugging
+
+## When to Use
+
+- **Use this tool:** When you want a persistent, named tab that survives across multiple tests
+- **Skip this tool:** For one-off tests or when you don't need to inspect the tab afterward (auto-generated sessions work fine)
 
 ## Input Parameters
 
-- \`sessionId\` (string, required) — Unique identifier for your session (e.g., "my-session", "session-1", "claude-a")
+- \`sessionId\` (string, required) — Unique identifier for your session (e.g., "my-work-session", "debug-session", "feature-x")
 
 ## Output
 
 \`\`\`json
 {
-  "sessionId": "my-session",
+  "sessionId": "my-work-session",
   "targetId": "E4F...",
   "status": "created | existing",
-  "tabTitle": "Director Session: my-session"
+  "tabTitle": "Director Session: my-work-session"
 }
 \`\`\`
 
 ## Workflow
 
-1. Call this once at the start of your Claude session
-2. Run tests with the same sessionId parameter
-3. All tests reuse the same tab
-4. Tab stays open when done (manually close when finished)
+1. **(Optional)** Call this once with a memorable session ID:
+   \`\`\`json
+   { "sessionId": "my-work-session" }
+   \`\`\`
 
-## Example
+2. Run tests with that sessionId:
+   \`\`\`json
+   { "testId": "login-flow", "sessionId": "my-work-session" }
+   \`\`\`
 
-\`\`\`json
-{ "sessionId": "my-work-session" }
-\`\`\`
+3. All tests with "my-work-session" reuse the same Chrome tab
+4. Tab stays open after tests for inspection
 
-Then run tests:
-\`\`\`json
-{ "testId": "login-flow", "sessionId": "my-work-session" }
-\`\`\`
+## Auto-Generated Sessions
 
-All tests with "my-work-session" use the same Chrome tab.
+If you run tests **without** calling this tool, each test gets an auto-generated session ID like \`auto-1707334567890\`. This works perfectly fine and prevents interference - you just won't have a persistent, named tab.
 
 ## Notes
 
 - Tab title will be "Director Session: <sessionId>" for easy identification
-- If tab is manually closed or Chrome crashes, it's auto-recreated on next test
-- To use a different tab, register a new session with different sessionId`,
+- If tab is manually closed, it's auto-recreated on next test
+- Use \`list_sessions\` to see all registered sessions`,
 
     inputSchema: {
       type: "object" as const,
@@ -1922,17 +1900,10 @@ All tests with "my-work-session" use the same Chrome tab.
         await client.close(); // Close connection but leave tab open
 
         return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({
-                sessionId,
-                targetId,
-                status: wasExisting ? 'existing' : 'created',
-                tabTitle: `Director Session: ${sessionId}`
-              }, null, 2)
-            }
-          ]
+          sessionId,
+          targetId,
+          status: wasExisting ? 'existing' : 'created',
+          tabTitle: `Director Session: ${sessionId}`
         };
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1982,17 +1953,135 @@ View all active Claude sessions and their associated Chrome tab IDs.
 
       const sessions = sessionManager.listSessions();
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify({
-              sessions,
-              count: sessions.length
-            }, null, 2)
-          }
-        ]
+      return { sessions, count: sessions.length };
+    }
+  };
+
+  /**
+   * Tool: get_step_dom
+   * Get DOM snapshot for a specific step in a test run
+   */
+  const getStepDomTool: ToolDef = {
+    name: "get_step_dom",
+    description: `Get the DOM snapshot for a specific step in a test run.
+
+## Purpose
+
+Fetch just the DOM snapshot for one step instead of retrieving all step traces. This is much more efficient when you only need to inspect the DOM at a specific point in the test.
+
+## Input Parameters
+
+- \`testId\` (string, required) — Test ID
+- \`runId\` (string, required) — Run ID
+- \`step_index\` (number, required) — Step index (0-based)
+- \`section\` (string, required) — Section where the step is located: "before", "steps", or "after"
+
+## Output
+
+Returns an object with:
+- \`step_index\` — The requested step index
+- \`section\` — The section
+- \`step_type\` — Type of step (e.g., "click", "eval")
+- \`label\` — Human-readable step label if available
+- \`status\` — Step execution status ("passed", "failed", "skipped")
+- \`dom_snapshot\` — HTML string of the DOM at that step (or null if not captured)
+- \`has_snapshot\` — Boolean indicating if a snapshot was captured
+
+## Example
+
+\`\`\`json
+{
+  "testId": "login-flow",
+  "runId": "abc-123",
+  "step_index": 5,
+  "section": "steps"
+}
+\`\`\`
+
+Returns:
+\`\`\`json
+{
+  "step_index": 5,
+  "section": "steps",
+  "step_type": "click",
+  "label": "Click login button",
+  "status": "passed",
+  "has_snapshot": true,
+  "dom_snapshot": "<html>...</html>"
+}
+\`\`\`
+
+## Notes
+
+- Returns an error if the step doesn't exist in the traces
+- DOM snapshots are only captured if the step had \`capture_dom: true\` or if it was the failure point
+- Use \`get_latest_result\` first to find the runId if you only know the testId`,
+
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        testId: {
+          type: "string",
+          description: "Test ID"
+        },
+        runId: {
+          type: "string",
+          description: "Run ID"
+        },
+        step_index: {
+          type: "number",
+          description: "Step index (0-based)"
+        },
+        section: {
+          type: "string",
+          enum: ["before", "steps", "after"],
+          description: "Section where the step is located"
+        }
+      },
+      required: ["testId", "runId", "step_index", "section"]
+    },
+
+    handler: async (args: Record<string, any>, ctx: { storage: Storage }): Promise<any> => {
+      const { testId, runId, step_index, section } = args as {
+        testId: string;
+        runId: string;
+        step_index: number;
+        section: 'before' | 'steps' | 'after';
       };
+
+      // Fetch the test run
+      const run = await storageModule.getRun(ctx.storage.storageDir, testId, runId);
+      if (!run) {
+        throw new Error(`Test run not found: testId=${testId}, runId=${runId}`);
+      }
+
+      // Find the step trace
+      const stepTrace = run.result.step_traces?.find(
+        trace => trace.step_index === step_index && trace.section === section
+      );
+
+      if (!stepTrace) {
+        throw new Error(
+          `Step not found in traces: section=${section}, step_index=${step_index}. ` +
+          `Available steps: ${run.result.step_traces?.map(t => `${t.section}[${t.step_index}]`).join(', ') || 'none'}`
+        );
+      }
+
+      // Return step info with DOM snapshot
+      const result = {
+        step_index: stepTrace.step_index,
+        section: stepTrace.section,
+        step_type: stepTrace.step_type,
+        label: stepTrace.label,
+        status: stepTrace.status,
+        has_snapshot: !!stepTrace.dom_snapshot,
+        dom_snapshot: stepTrace.dom_snapshot || null,
+        // Also include other useful debugging info
+        duration_ms: stepTrace.duration_ms,
+        error: stepTrace.error,
+      };
+
+      return result;
     }
   };
 
@@ -2019,6 +2108,7 @@ View all active Claude sessions and their associated Chrome tab IDs.
     validateTestEditTool,
     registerSessionTool,
     listSessionsTool,
+    getStepDomTool,
   ];
 
   /**
@@ -2039,35 +2129,23 @@ View all active Claude sessions and their associated Chrome tab IDs.
       // Special handling for run_test (supports two modes: testId or inline test)
       if (name === "run_test") {
         try {
-          const { test, testId, port: portArg, inputs: inputValues, sessionId, createTab } = args;
+          const { test, testId, port: portArg, inputs: inputValues, sessionId: userSessionId } = args;
           const port = (portArg as number) ?? 9222;
           const initialVars = inputValues as Record<string, unknown> | undefined;
 
-          // Initialize session manager if sessionId provided
-          let sessionManager: SessionManager | undefined;
-          if (sessionId && typeof sessionId === 'string') {
-            sessionManager = new SessionManager(storageDir);
-            await sessionManager.load();
-          }
+          // Force session management for all tests
+          // Auto-generate session ID if not provided
+          const sessionId = (userSessionId && typeof userSessionId === 'string' && userSessionId.trim())
+            ? userSessionId.trim()
+            : `auto-${Date.now()}`;
 
-          // Determine createTab behavior
-          const shouldCreateTab = sessionId ? false : (createTab ?? false);
+          // Always initialize session manager
+          const sessionManager = new SessionManager(storageDir);
+          await sessionManager.load();
 
           // Determine which mode to use
           if (testId) {
             // Mode 1: Load and run saved test, persist result
-            if (!testId || typeof testId !== "string") {
-              return {
-                content: [
-                  {
-                    type: "text" as const,
-                    text: `Error: testId must be a non-empty string`,
-                  },
-                ],
-                isError: true,
-              };
-            }
-
             const savedTest = await storage.getTest(testId);
             if (!savedTest) {
               return {
@@ -2083,7 +2161,7 @@ View all active Claude sessions and their associated Chrome tab IDs.
 
             // Run the loaded test definition
             const testData = savedTest.definition;
-            const result = await runTest(testData, port, undefined, undefined, initialVars, shouldCreateTab, sessionId, sessionManager);
+            const result = await runTest(testData, port, undefined, undefined, initialVars, false, sessionId, sessionManager);
 
             // Save the result
             const testRun = await storage.saveRun(testId, result);
@@ -2112,7 +2190,7 @@ View all active Claude sessions and their associated Chrome tab IDs.
             }
 
             const testData = parseResult.data as TestDef;
-            const result = await runTest(testData, port, undefined, undefined, initialVars, shouldCreateTab, sessionId, sessionManager);
+            const result = await runTest(testData, port, undefined, undefined, initialVars, false, sessionId, sessionManager);
 
             return {
               content: [
