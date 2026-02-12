@@ -139,6 +139,7 @@ export const AppBar: React.FC = () => {
             <Menu size={20} />
           </button>
           <div className="flex items-center gap-2">
+            <img src="/icon.png" alt="chromedev-director" className="h-8 w-8" />
             <div className="text-xl font-bold text-gray-900">
               chromedev-director
             </div>
@@ -159,7 +160,8 @@ export const AppBar: React.FC = () => {
                       }, 150);
                     }}
                     disabled={isSwitching}
-                    className="text-xs font-mono text-gray-800 bg-transparent outline-none min-w-[200px] max-w-md"
+                    size={Math.max(20, inputValue.length + 2)}
+                    className="text-xs font-mono text-gray-800 bg-transparent outline-none"
                     placeholder="/path/to/project"
                   />
                 </div>
@@ -174,7 +176,7 @@ export const AppBar: React.FC = () => {
                 title="Click to switch project"
               >
                 <FolderOpen size={14} className="text-gray-500 flex-shrink-0" />
-                <span className="text-xs font-mono text-gray-600 truncate max-w-xs">
+                <span className="text-xs font-mono text-gray-600">
                   {projectRoot}
                 </span>
               </button>

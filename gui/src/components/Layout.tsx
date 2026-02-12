@@ -28,7 +28,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar - hidden on mobile unless toggled */}
         {sidebarOpen && (
-          <div className="hidden md:flex md:w-64 md:flex-col md:border-r md:border-gray-200 md:bg-white overflow-y-auto">
+          <div className="hidden md:flex md:w-96 md:flex-col md:border-r md:border-gray-200 md:bg-white overflow-y-auto">
             <Sidebar />
           </div>
         )}
@@ -38,7 +38,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           <div className="fixed inset-0 z-40 bg-black bg-opacity-50 md:hidden" />
         )}
         <div
-          className={`fixed top-16 left-0 bottom-0 w-64 bg-white border-r border-gray-200 z-50 overflow-y-auto transform transition-transform md:hidden ${
+          className={`fixed top-16 left-0 bottom-0 w-96 bg-white border-r border-gray-200 z-50 overflow-y-auto transform transition-transform md:hidden ${
             sidebarOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
         >

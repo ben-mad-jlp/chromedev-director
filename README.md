@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="gui/public/icon.png" alt="chromedev-director" width="128" />
+</p>
+
 # chromedev-director
 
 MCP server and web GUI for autonomous browser testing via Chrome DevTools Protocol.

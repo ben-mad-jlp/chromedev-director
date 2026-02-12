@@ -727,6 +727,10 @@ export function createApiServer(options: GuiOptions): { app: Hono; injectWebSock
   // Serve static assets (JS, CSS, images)
   app.use('/assets/*', serveStatic({ root: guiDistPath }));
 
+  // Serve root-level static files (favicon, icon, etc.)
+  app.get('/favicon.ico', serveStatic({ root: guiDistPath, path: '/favicon.ico' }));
+  app.get('/icon.png', serveStatic({ root: guiDistPath, path: '/icon.png' }));
+
   // SPA fallback: serve index.html for all non-API routes
   app.get('*', async (c) => {
     const indexPath = path.join(guiDistPath, 'index.html');

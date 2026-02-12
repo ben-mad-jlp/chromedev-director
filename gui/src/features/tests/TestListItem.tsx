@@ -49,14 +49,14 @@ export const TestListItem: React.FC<TestListItemProps> = ({
     >
       <div className="min-w-0">
         <div className="flex items-baseline justify-between gap-2">
-          <h3 className="font-medium text-sm truncate">{test.name}</h3>
+          <h3 className="font-medium text-sm break-words">{test.name}</h3>
           <span className="text-xs text-gray-500 flex-shrink-0" title={new Date(test.updatedAt).toLocaleString()}>
             {formatRelativeTime(test.updatedAt)}
           </span>
         </div>
-        <p className="text-xs text-gray-500 font-mono truncate">{test.id}</p>
+        <p className="text-xs text-gray-500 font-mono break-all">{test.id}</p>
         {test.description && (
-          <p className="text-xs text-gray-500 truncate">
+          <p className="text-xs text-gray-500 break-words">
             {test.description}
           </p>
         )}

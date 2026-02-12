@@ -1,9 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { Search, FolderOpen, RefreshCw } from 'lucide-react';
+import React, { useEffect } from 'react';
+import { Search, RefreshCw } from 'lucide-react';
 import { useUIStore } from '@/stores/ui-store';
 import { useTestStore } from '@/stores/test-store';
 import TestList from '@/features/tests/TestList';
-import OpenProjectDialog from './OpenProjectDialog';
 
 /**
  * Sidebar component
@@ -22,7 +21,6 @@ import OpenProjectDialog from './OpenProjectDialog';
 export const Sidebar: React.FC = () => {
   const { searchQuery, setSearchQuery } = useUIStore();
   const { tests, isLoading, error, fetchTests, selectedTestId, selectTest } = useTestStore();
-  const [showOpenProject, setShowOpenProject] = useState(false);
 
   // Fetch tests on mount
   useEffect(() => {
@@ -83,21 +81,6 @@ export const Sidebar: React.FC = () => {
         )}
       </div>
 
-      {/* Footer */}
-      <div className="border-t border-gray-200 p-2 flex-shrink-0">
-        <button
-          onClick={() => setShowOpenProject(true)}
-          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
-        >
-          <FolderOpen size={16} className="text-gray-400" />
-          Open Project...
-        </button>
-      </div>
-
-      <OpenProjectDialog
-        open={showOpenProject}
-        onClose={() => setShowOpenProject(false)}
-      />
     </div>
   );
 };
