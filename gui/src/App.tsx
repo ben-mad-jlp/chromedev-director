@@ -134,21 +134,15 @@ const App: React.FC = () => {
   }, [fetchTests, handleWsMessage]);
 
   return (
-    <Routes>
-      {/* HomePage - shows empty state or test list */}
-      <Route path="/" element={<HomePage />} />
+    <Layout>
+      <Routes>
+        {/* Empty state when no test selected */}
+        <Route path="/" element={<HomePage />} />
 
-      {/* Test detail with Layout (sidebar + main content) */}
-      <Route
-        path="/tests/:testId"
-        element={
-          <Layout>
-            <TestDetail />
-          </Layout>
-        }
-      />
-
-    </Routes>
+        {/* Test detail */}
+        <Route path="/tests/:testId" element={<TestDetail />} />
+      </Routes>
+    </Layout>
   );
 };
 
