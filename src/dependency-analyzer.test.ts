@@ -141,7 +141,7 @@ describe('analyzeVariableDependencies', () => {
     expect(analysis.variables['count'].used_by.length).toBeGreaterThan(0);
   });
 
-  it('should handle nested loop steps', () => {
+  it('should handle nested loop steps with nested_index', () => {
     const test: SavedTest = {
       id: 'test-6',
       name: 'Test',
@@ -172,6 +172,95 @@ describe('analyzeVariableDependencies', () => {
     expect(analysis.variables['counter']).toBeDefined();
     expect(analysis.variables['counter'].set_by).toBeDefined();
     expect(analysis.variables['counter'].used_by.length).toBeGreaterThan(0);
+
+    // The loop body step should have nested_index
+    const loopUsage = analysis.variables['counter'].used_by.find(u => u.nested_index != null);
+    expect(loopUsage).toBeDefined();
+    expect(loopUsage!.nested_index).toBe(0);
+    expect(loopUsage!.index).toBe(1); // parent loop is at step index 1
+  });
+
+  it('should distinguish between different steps within a loop body', () => {
+    const test: SavedTest = {
+      id: 'test-multi-loop',
+      name: 'Test',
+      description: '',
+      tags: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      definition: {
+        url: 'https://example.com',
+        steps: [
+          { eval: '[]', as: 'items' },
+          {
+            loop: {
+              over: '[1,2,3]',
+              steps: [
+                { eval: '$vars.items', as: 'temp' },
+                { eval: '$vars.temp.concat($vars.items)', as: 'result' }
+              ]
+            }
+          }
+        ]
+      }
+    };
+
+    const analysis = analyzeVariableDependencies(test);
+
+    // Find usages of 'items' inside the loop
+    const loopUsages = analysis.variables['items'].used_by.filter(u => u.nested_index != null);
+    expect(loopUsages.length).toBe(2);
+
+    // First loop step (nested_index 0) references $vars.items
+    expect(loopUsages[0].nested_index).toBe(0);
+    expect(loopUsages[0].step_label).toContain('Loop step 0');
+
+    // Second loop step (nested_index 1) also references $vars.items
+    expect(loopUsages[1].nested_index).toBe(1);
+    expect(loopUsages[1].step_label).toContain('Loop step 1');
+  });
+
+  it('should handle deeply nested loops (loop within loop)', () => {
+    const test: SavedTest = {
+      id: 'test-deep-loop',
+      name: 'Test',
+      description: '',
+      tags: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      definition: {
+        url: 'https://example.com',
+        steps: [
+          { eval: '0', as: 'total' },
+          {
+            loop: {
+              over: '[1,2]',
+              steps: [
+                {
+                  loop: {
+                    over: '[10,20]',
+                    steps: [
+                      { eval: '$vars.total + 1', as: 'total' }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    };
+
+    const analysis = analyzeVariableDependencies(test);
+
+    // 'total' should be referenced inside the deeply nested loop
+    expect(analysis.variables['total']).toBeDefined();
+
+    // The deeply nested usage should exist
+    const deepUsage = analysis.variables['total'].used_by.find(
+      u => u.nested_index != null && u.step_label.includes('Loop step 0')
+    );
+    expect(deepUsage).toBeDefined();
   });
 
   it('should use comments as step labels when available', () => {

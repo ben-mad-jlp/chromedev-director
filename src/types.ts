@@ -303,16 +303,6 @@ export type TestResult =
     };
 
 /**
- * Step handler signature
- * Represents the function signature that all step handlers must implement
- */
-export type StepHandler = (
-  cdpClient: CDPClient,
-  step: StepDef,
-  vars: Record<string, unknown>
-) => Promise<{ success: boolean; error?: string; value?: unknown }>;
-
-/**
  * Console message for tracking
  * Represents a single console message captured during test execution
  */
@@ -335,7 +325,6 @@ export interface NetworkResponse {
 
 /**
  * CDP Client interface (placeholder for actual implementation)
- * This is used in the StepHandler type definition
  */
 export interface CDPClient {
   connect(url: string): Promise<void>;

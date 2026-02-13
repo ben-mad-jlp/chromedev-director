@@ -7,6 +7,7 @@ import { SuiteResult, SuiteTestResult, OnEvent, TestResult } from "./types.js";
 import { runTest } from "./step-runner.js";
 import * as storage from "./storage.js";
 import { SessionManager } from "./session-manager.js";
+import CDP from "chrome-remote-interface";
 
 /**
  * Simple counting semaphore for limiting concurrency
@@ -56,6 +57,50 @@ export type SuiteEvent =
   | { type: "suite:complete"; result: SuiteResult };
 
 export type OnSuiteEvent = (event: SuiteEvent) => void;
+
+/**
+ * Cleans up suite-created sessions after all tests finish.
+ * Closes Chrome tabs and unregisters sessions from the registry.
+ * Only cleans up auto-generated suite sessions (those starting with "suite-").
+ */
+async function cleanupSuiteSessions(
+  sessionIds: string[],
+  sessionManager: SessionManager,
+  port: number
+): Promise<void> {
+  if (sessionIds.length === 0) return;
+
+  let client: any;
+  try {
+    client = await CDP({ port });
+    const { Target } = client;
+
+    for (const sessionId of sessionIds) {
+      // Only clean up auto-generated suite sessions
+      if (!sessionId.startsWith("suite-")) continue;
+
+      const targetId = sessionManager.getTargetId(sessionId);
+      if (targetId) {
+        try {
+          await Target.closeTarget({ targetId });
+        } catch {
+          // Tab may already be closed
+        }
+      }
+      try {
+        await sessionManager.unregisterSession(sessionId);
+      } catch {
+        // Ignore unregister errors during cleanup
+      }
+    }
+  } catch {
+    // CDP connection may fail if Chrome is gone; best-effort cleanup
+  } finally {
+    if (client) {
+      try { await client.close(); } catch { /* ignore */ }
+    }
+  }
+}
 
 /**
  * Safely emit a suite event, ignoring listener errors
@@ -123,6 +168,7 @@ export async function runSuite(
 
   // When concurrency > 1, each test gets its own session ID for tab isolation
   const semaphore = new Semaphore(concurrency);
+  const createdSessionIds: string[] = [];
 
   const promises: Promise<void>[] = [];
 
@@ -163,8 +209,9 @@ export async function runSuite(
         }
 
         // Run the test with unique session ID for tab isolation when concurrent
-        // Use suite-specific session IDs to avoid interference between concurrent tests
-        const sessionId = concurrency > 1 ? `suite-${testId}-${Date.now()}` : `suite-sequential-${Date.now()}`;
+        // Use suite-specific session IDs with index to prevent collisions when tests start in the same ms
+        const sessionId = concurrency > 1 ? `suite-${testId}-${Date.now()}-${index}` : `suite-sequential-${Date.now()}-${index}`;
+        createdSessionIds.push(sessionId);
         testResult = await runTest(saved.definition, port, onTestEvent, projectRoot, undefined, concurrency > 1, sessionId, sessionManager);
 
         // Save the run result
@@ -219,6 +266,9 @@ export async function runSuite(
   }
 
   await Promise.all(promises);
+
+  // Clean up suite-created sessions (close tabs + unregister)
+  await cleanupSuiteSessions(createdSessionIds, sessionManager, port);
 
   const suiteResult: SuiteResult = {
     status: failed > 0 ? "failed" : "passed",

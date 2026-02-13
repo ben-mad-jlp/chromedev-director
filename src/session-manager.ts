@@ -20,13 +20,26 @@ interface SessionRegistry {
 /**
  * Manages persistent Chrome tab sessions for Claude instances.
  * Each session gets a dedicated, persistent Chrome tab that reuses across tests.
+ *
+ * All mutations are serialized through a write queue to prevent concurrent
+ * writes from overwriting each other's changes.
  */
 export class SessionManager {
   private registryPath: string;
   private registry: SessionRegistry = { sessions: {} };
+  private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(storageDir: string) {
     this.registryPath = path.join(storageDir, 'sessions.json');
+  }
+
+  /**
+   * Enqueues a write operation, ensuring mutations are serialized.
+   * Each write waits for the previous one to complete before proceeding.
+   */
+  private enqueueWrite(fn: () => Promise<void>): Promise<void> {
+    this.writeQueue = this.writeQueue.then(fn, fn);
+    return this.writeQueue;
   }
 
   /**
@@ -36,9 +49,14 @@ export class SessionManager {
     try {
       const data = await fs.readFile(this.registryPath, 'utf-8');
       this.registry = JSON.parse(data);
-    } catch {
-      // File doesn't exist yet, use empty registry
-      this.registry = { sessions: {} };
+    } catch (error: any) {
+      if (error?.code === 'ENOENT') {
+        // File doesn't exist yet, use empty registry
+        this.registry = { sessions: {} };
+      } else {
+        console.warn(`Warning: Could not load session registry: ${error?.message || error}`);
+        this.registry = { sessions: {} };
+      }
     }
   }
 
@@ -60,33 +78,42 @@ export class SessionManager {
   }
 
   /**
-   * Register a session with its Chrome tab targetId
+   * Register a session with its Chrome tab targetId.
+   * Serialized through write queue to prevent concurrent overwrites.
    */
   async registerSession(sessionId: string, targetId: string): Promise<void> {
-    this.registry.sessions[sessionId] = {
-      targetId,
-      createdAt: this.registry.sessions[sessionId]?.createdAt || new Date().toISOString(),
-      lastUsed: new Date().toISOString()
-    };
-    await this.save();
+    return this.enqueueWrite(async () => {
+      this.registry.sessions[sessionId] = {
+        targetId,
+        createdAt: this.registry.sessions[sessionId]?.createdAt || new Date().toISOString(),
+        lastUsed: new Date().toISOString()
+      };
+      await this.save();
+    });
   }
 
   /**
-   * Update last used timestamp for a session
+   * Update last used timestamp for a session.
+   * Serialized through write queue to prevent concurrent overwrites.
    */
   async updateLastUsed(sessionId: string): Promise<void> {
-    if (this.registry.sessions[sessionId]) {
-      this.registry.sessions[sessionId].lastUsed = new Date().toISOString();
-      await this.save();
-    }
+    return this.enqueueWrite(async () => {
+      if (this.registry.sessions[sessionId]) {
+        this.registry.sessions[sessionId].lastUsed = new Date().toISOString();
+        await this.save();
+      }
+    });
   }
 
   /**
-   * Unregister a session (remove from registry)
+   * Unregister a session (remove from registry).
+   * Serialized through write queue to prevent concurrent overwrites.
    */
   async unregisterSession(sessionId: string): Promise<void> {
-    delete this.registry.sessions[sessionId];
-    await this.save();
+    return this.enqueueWrite(async () => {
+      delete this.registry.sessions[sessionId];
+      await this.save();
+    });
   }
 
   /**

@@ -6,6 +6,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { runSuite, SuiteEvent } from "./suite-runner";
 import * as storage from "./storage";
 
+// Track CDP mock calls for cleanup verification
+const mockCloseTarget = vi.fn().mockResolvedValue({});
+const mockCDPClose = vi.fn().mockResolvedValue({});
+
+// Mock chrome-remote-interface for suite cleanup
+vi.mock("chrome-remote-interface", () => ({
+  default: vi.fn().mockImplementation(async () => ({
+    Target: {
+      closeTarget: mockCloseTarget,
+    },
+    close: mockCDPClose,
+  })),
+}));
+
 // Mock storage module
 vi.mock("./storage", () => ({
   getTest: vi.fn(),
@@ -23,6 +37,8 @@ import { runTest } from "./step-runner";
 describe("suite-runner", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCloseTarget.mockClear();
+    mockCDPClose.mockClear();
   });
 
   it("throws when neither tag nor testIds are provided", async () => {
@@ -449,5 +465,65 @@ describe("suite-runner concurrency", () => {
     // createTab should be false when concurrency is 1
     const call = (runTest as any).mock.calls[0];
     expect(call[5]).toBe(false);
+  });
+
+  it("generates unique sessionIds with index to prevent collisions", async () => {
+    const mockTests = [
+      { id: "test-1", name: "Test 1", definition: { url: "http://localhost", steps: [] } },
+      { id: "test-2", name: "Test 2", definition: { url: "http://localhost", steps: [] } },
+    ];
+
+    (storage.getTest as any).mockImplementation(async (_dir: string, id: string) => {
+      return mockTests.find(t => t.id === id) ?? null;
+    });
+
+    (runTest as any).mockResolvedValue({
+      status: "passed", steps_completed: 1, duration_ms: 10, console_log: [], network_log: [],
+    });
+
+    (storage.saveRun as any).mockResolvedValue({ id: "run-x" });
+
+    await runSuite({
+      testIds: ["test-1", "test-2"],
+      storageDir: "/tmp/test",
+      concurrency: 2,
+    });
+
+    // Verify each runTest call got a different sessionId (7th argument, index 6)
+    const calls = (runTest as any).mock.calls;
+    const sessionIds = calls.map((c: any[]) => c[6]);
+    const uniqueIds = new Set(sessionIds);
+    expect(uniqueIds.size).toBe(sessionIds.length);
+
+    // Each sessionId should end with the index
+    expect(sessionIds[0]).toMatch(/-0$/);
+    expect(sessionIds[1]).toMatch(/-1$/);
+  });
+
+  it("cleans up suite sessions after all tests complete", async () => {
+    const mockTest = { id: "test-1", name: "Test 1", definition: { url: "http://localhost", steps: [] } };
+
+    (storage.getTest as any)
+      .mockResolvedValueOnce(mockTest) // resolve list
+      .mockResolvedValueOnce(mockTest); // run test
+
+    (runTest as any).mockResolvedValueOnce({
+      status: "passed", steps_completed: 1, duration_ms: 10, console_log: [], network_log: [],
+    });
+
+    (storage.saveRun as any).mockResolvedValue({ id: "run-x" });
+
+    await runSuite({
+      testIds: ["test-1"],
+      storageDir: "/tmp/test",
+      concurrency: 2,
+    });
+
+    // Cleanup should have attempted to close the tab via CDP
+    // The CDP mock was called for cleanup
+    const CDP = (await import("chrome-remote-interface")).default;
+    expect(CDP).toHaveBeenCalled();
+    // Should close the CDP connection after cleanup
+    expect(mockCDPClose).toHaveBeenCalled();
   });
 });

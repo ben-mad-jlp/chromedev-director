@@ -62,6 +62,9 @@ export class CDPClient {
   private sessionManager?: SessionManager;
   private sessionTabCreated: boolean = false;
 
+  /** Per-session lock to prevent TOCTOU races in findOrCreateSessionTab */
+  private static sessionLocks = new Map<string, Promise<string>>();
+
   /**
    * Creates a new CDP client instance
    * @param port - The port on which Chrome DevTools Protocol server is listening
@@ -142,12 +145,33 @@ export class CDPClient {
   }
 
   /**
-   * Finds or creates a persistent session tab
-   * Checks registry for existing tab, verifies it still exists, or creates new tab
+   * Finds or creates a persistent session tab, with per-session locking.
+   * Concurrent calls for the same sessionId are serialized to prevent TOCTOU races
+   * where two instances both find a session missing and both create new tabs.
    * @param sessionId - The session identifier
    * @returns The Chrome targetId for the session's tab
    */
   private async findOrCreateSessionTab(sessionId: string): Promise<string> {
+    // If another instance is already finding/creating for this sessionId, wait for it
+    const existing = CDPClient.sessionLocks.get(sessionId);
+    if (existing) {
+      return existing;
+    }
+
+    const promise = this._findOrCreateSessionTabInner(sessionId);
+    CDPClient.sessionLocks.set(sessionId, promise);
+    try {
+      return await promise;
+    } finally {
+      CDPClient.sessionLocks.delete(sessionId);
+    }
+  }
+
+  /**
+   * Inner implementation: checks registry for existing tab, verifies it still exists, or creates new tab.
+   * If registerSession fails after tab creation, the orphaned tab is cleaned up.
+   */
+  private async _findOrCreateSessionTabInner(sessionId: string): Promise<string> {
     // Check registry for existing tab
     const registeredTargetId = this.sessionManager!.getTargetId(sessionId);
 
@@ -178,8 +202,13 @@ export class CDPClient {
       background: false
     });
 
-    // Store in registry
-    await this.sessionManager!.registerSession(sessionId, targetId);
+    // Store in registry — if this fails, clean up the orphaned tab
+    try {
+      await this.sessionManager!.registerSession(sessionId, targetId);
+    } catch (error) {
+      try { await this.domains.Target.closeTarget({ targetId }); } catch { /* tab may already be closed */ }
+      throw error;
+    }
     this.sessionTabCreated = true;
 
     return targetId;
