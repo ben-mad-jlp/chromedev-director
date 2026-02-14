@@ -16,6 +16,7 @@ import { analyzeVariableDependencies } from "./dependency-analyzer.js";
 import { validateEdit, formatValidationResults, hasErrors, type EditChange } from "./validation-rules.js";
 import { SessionManager } from "./session-manager.js";
 import { CDPClient } from "./cdp-client.js";
+import CDP from "chrome-remote-interface";
 
 /**
  * Storage interface for CRUD operations
@@ -190,7 +191,7 @@ const GetLatestResultInputSchema = z.object({
  */
 function summarizeResult(
   result: TestResult,
-  extra: { testId?: string; runId?: string } = {}
+  extra: { testId?: string; runId?: string; sessionId?: string; targetId?: string } = {}
 ): string {
   const summary: Record<string, unknown> = {
     status: result.status,
@@ -199,6 +200,12 @@ function summarizeResult(
 
   if (extra.testId) summary.testId = extra.testId;
   if (extra.runId) summary.runId = extra.runId;
+  if (extra.sessionId || extra.targetId) {
+    summary.session = {
+      ...(extra.sessionId && { sessionId: extra.sessionId }),
+      ...(extra.targetId && { targetId: extra.targetId }),
+    };
+  }
 
   if (result.status === "passed") {
     summary.steps_completed = result.steps_completed;
@@ -266,8 +273,18 @@ export function createMcpServer(): Server {
     }
   );
 
-  // Initialize storage instance using the storage module
+  // Initialize storage and session manager (singleton shared across all tool calls)
   const storageDir = process.env.DIRECTOR_STORAGE_DIR || process.cwd() + "/.chromedev-director";
+  const sharedSessionManager = new SessionManager(storageDir);
+  // Load is async — we'll ensure it's loaded before first use
+  let sessionManagerLoaded = false;
+  async function getSessionManager(): Promise<SessionManager> {
+    if (!sessionManagerLoaded) {
+      await sharedSessionManager.load();
+      sessionManagerLoaded = true;
+    }
+    return sharedSessionManager;
+  }
   const storage: Storage = {
     storageDir,
     async saveTest(
@@ -671,7 +688,8 @@ Same summary plus the requested large fields included in full.
 - Returns null if the result is not found
 - \`dom_snapshot\`, \`screenshot\`, and \`step_definition\` are only available for failed runs
 - \`step_traces\` provides detailed per-step execution information for debugging
-- Use \`list_results\` first to get available run IDs`,
+- Use \`list_results\` first to get available run IDs
+- **Tip:** If you only need the DOM for a single step, use \`get_step_dom\` instead — it's much more efficient than requesting the full \`dom_snapshot\` or \`step_traces\` sections.`,
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -1037,17 +1055,12 @@ If the \`if\` expression throws, the step fails. If an eval step with \`as\` is 
 - CORS preflight (OPTIONS) is handled automatically — responds with 204 + CORS headers
 - Register mocks in \`before\` steps so they're active before page navigation
 
-## Session Management (Automatic)
+## Session Management
 
-**All tests now automatically use session management to prevent interference between Claude instances.**
+**\`sessionId\` is required.** Every test run must specify a session ID to control which Chrome tab is used.
 
-If you don't provide a \`sessionId\`, one will be auto-generated (e.g., \`auto-1707334567890\`). This ensures:
-- Each test run is isolated from other Claude instances
-- No interference when multiple Claude sessions run tests simultaneously
-- Auto-recovery if tab is manually closed
-
-**To reuse the same tab across multiple tests** (recommended for debugging):
-1. Call \`register_session\` once with a memorable ID:
+**To reuse the same tab across multiple tests** (recommended):
+1. Optionally call \`register_session\` to pre-create a tab:
    \`\`\`json
    { "sessionId": "my-work-session" }
    \`\`\`
@@ -1057,15 +1070,13 @@ If you don't provide a \`sessionId\`, one will be auto-generated (e.g., \`auto-1
    { "testId": "login-flow", "sessionId": "my-work-session" }
    \`\`\`
 
-**Benefits of explicit sessionId:**
-- Tab persists across all your tests
-- Easy to identify in Chrome ("Director Session: my-work-session")
-- Better for debugging (inspect tab after test completes)
+If the session ID hasn't been registered, a new tab will be created automatically on the first test run.
 
-**Auto-generated sessions:**
-- Each test run gets a unique session
-- Prevents any possibility of interference
-- Tab is auto-cleaned up after test completes
+**Benefits:**
+- Tab reuse across tests (no tab accumulation)
+- Easy to identify in Chrome ("Director Session: my-work-session")
+- Isolation between different Claude instances (use different session IDs)
+- Better for debugging (inspect tab after test completes)
 
 ## Tips
 
@@ -1097,10 +1108,10 @@ If you don't provide a \`sessionId\`, one will be auto-generated (e.g., \`auto-1
         },
         sessionId: {
           type: "string",
-          description: "Session identifier for persistent tab reuse across multiple tests. If not provided, an auto-generated session ID will be created for this test run (e.g., 'auto-1707334567890'). Use an explicit sessionId to reuse the same tab across multiple tests for easier debugging.",
+          description: "Required. Session identifier for tab reuse across multiple tests. Use a consistent ID (e.g., 'my-session') to reuse the same tab. If the session hasn't been registered via register_session, a new tab will be created automatically.",
         },
       },
-      required: [],
+      required: ["sessionId"],
     },
   };
 
@@ -1788,21 +1799,20 @@ validate_test_edit({
    */
   const registerSessionTool: ToolDef = {
     name: "register_session",
-    description: `Pre-register a persistent Chrome tab with a memorable session ID.
+    description: `Pre-register a persistent Chrome tab with a session ID.
 
 ## Purpose
 
-**NOTE: Session management is now automatic.** All test runs automatically use sessions to prevent interference.
+This tool is **optional** — \`run_test\` will create a tab on-the-fly if the session ID hasn't been registered yet.
 
-This tool is **optional** and only needed if you want to:
-1. Use a **memorable session ID** (e.g., "my-work-session" instead of "auto-1707334567890")
-2. **Pre-create the tab** before running tests (faster first test)
-3. Keep the **same tab across multiple tests** for easier debugging
+Use this tool if you want to:
+1. **Pre-create the tab** before running tests (faster first test)
+2. **Verify** the tab is ready and get its target ID upfront
 
 ## When to Use
 
-- **Use this tool:** When you want a persistent, named tab that survives across multiple tests
-- **Skip this tool:** For one-off tests or when you don't need to inspect the tab afterward (auto-generated sessions work fine)
+- **Use this tool:** When you want to pre-create a tab before running tests
+- **Skip this tool:** If you're fine with \`run_test\` creating the tab automatically on first use
 
 ## Input Parameters
 
@@ -1862,9 +1872,8 @@ If you run tests **without** calling this tool, each test gets an auto-generated
         throw new Error('sessionId must be a non-empty string');
       }
 
-      // Initialize session manager
-      const sessionManager = new SessionManager(ctx.storage.storageDir);
-      await sessionManager.load();
+      // Use shared session manager
+      const sessionManager = await getSessionManager();
 
       // Check if session already exists
       const existingTargetId = sessionManager.getTargetId(sessionId);
@@ -1918,21 +1927,23 @@ If you run tests **without** calling this tool, each test gets an auto-generated
    */
   const listSessionsTool: ToolDef = {
     name: "list_sessions",
-    description: `List all registered Claude sessions and their Chrome tabs.
+    description: `List all registered Claude sessions with health status.
 
 ## Purpose
 
-View all active Claude sessions and their associated Chrome tab IDs.
+View all active Claude sessions, their associated Chrome tab IDs, and whether each tab is still alive in Chrome.
 
 ## Output
 
 \`\`\`json
 {
   "sessions": [
-    { "sessionId": "session-a", "targetId": "...", "createdAt": "...", "lastUsed": "..." },
-    { "sessionId": "session-b", "targetId": "...", "createdAt": "...", "lastUsed": "..." }
+    { "sessionId": "session-a", "targetId": "...", "createdAt": "...", "lastUsed": "...", "tabAlive": true, "ageHours": 2.5 },
+    { "sessionId": "session-b", "targetId": "...", "createdAt": "...", "lastUsed": "...", "tabAlive": false, "ageHours": 168.0 }
   ],
-  "count": 2
+  "count": 2,
+  "alive": 1,
+  "dead": 1
 }
 \`\`\`
 
@@ -1948,12 +1959,251 @@ View all active Claude sessions and their associated Chrome tab IDs.
     },
 
     handler: async (args: Record<string, any>, ctx: { storage: Storage }): Promise<any> => {
-      const sessionManager = new SessionManager(ctx.storage.storageDir);
-      await sessionManager.load();
-
+      const sessionManager = await getSessionManager();
       const sessions = sessionManager.listSessions();
+      const port = parseInt(process.env.CDP_PORT || '9222');
 
-      return { sessions, count: sessions.length };
+      // Try to get live targets for health check
+      let liveTargetIds = new Set<string>();
+      try {
+        const tmpClient = await CDP({ port });
+        const { targetInfos = [] } = await tmpClient.Target.getTargets();
+        for (const t of targetInfos) {
+          liveTargetIds.add(t.targetId);
+        }
+        await tmpClient.close();
+      } catch {
+        // Chrome may not be running — all tabs will show as dead
+      }
+
+      const now = Date.now();
+      const enriched = sessions.map(s => {
+        const tabAlive = liveTargetIds.has(s.targetId);
+        const ageHours = Math.round(((now - new Date(s.createdAt).getTime()) / (1000 * 60 * 60)) * 10) / 10;
+        return { ...s, tabAlive, ageHours };
+      });
+
+      const alive = enriched.filter(s => s.tabAlive).length;
+      const dead = enriched.filter(s => !s.tabAlive).length;
+
+      return { sessions: enriched, count: enriched.length, alive, dead };
+    }
+  };
+
+  /**
+   * Tool: unregister_session
+   * Remove a session from the registry and optionally close its Chrome tab
+   */
+  const unregisterSessionTool: ToolDef = {
+    name: "unregister_session",
+    description: `Remove a session from the registry and optionally close its Chrome tab.
+
+## Purpose
+
+Clean up a specific session that is no longer needed. Removes the session from the persistent registry and optionally closes its associated Chrome tab.
+
+## Input Parameters
+
+- \`sessionId\` (string, required) — The session ID to remove
+- \`closeTab\` (boolean, default true) — Whether to close the Chrome tab associated with this session
+
+## Output
+
+\`\`\`json
+{
+  "sessionId": "my-session",
+  "removed": true,
+  "tabClosed": true
+}
+\`\`\`
+
+## Example
+
+\`\`\`json
+{
+  "sessionId": "auto-abc123"
+}
+\`\`\``,
+
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        sessionId: {
+          type: "string",
+          description: "The session ID to remove"
+        },
+        closeTab: {
+          type: "boolean",
+          description: "Whether to close the Chrome tab (default: true)"
+        }
+      },
+      required: ["sessionId"]
+    },
+
+    handler: async (args: Record<string, any>, ctx: { storage: Storage }): Promise<any> => {
+      const { sessionId, closeTab = true } = args;
+
+      if (!sessionId || typeof sessionId !== 'string') {
+        throw new Error('sessionId must be a non-empty string');
+      }
+
+      const sessionManager = await getSessionManager();
+      const targetId = sessionManager.getTargetId(sessionId);
+
+      if (!targetId) {
+        throw new Error(`Session "${sessionId}" not found`);
+      }
+
+      let tabClosed = false;
+      if (closeTab && targetId) {
+        const port = parseInt(process.env.CDP_PORT || '9222');
+        try {
+          const tmpClient = await CDP({ port });
+          await tmpClient.Target.closeTarget({ targetId });
+          await tmpClient.close();
+          tabClosed = true;
+        } catch {
+          // Tab may already be closed or Chrome not running
+        }
+      }
+
+      await sessionManager.unregisterSession(sessionId);
+
+      return { sessionId, removed: true, tabClosed };
+    }
+  };
+
+  /**
+   * Tool: cleanup_sessions
+   * Bulk cleanup sessions with filters (stale, auto-prefix, or all)
+   */
+  const cleanupSessionsTool: ToolDef = {
+    name: "cleanup_sessions",
+    description: `Bulk cleanup sessions with filters.
+
+## Purpose
+
+Remove multiple sessions at once based on filtering criteria. Can remove stale sessions (dead tabs or old), auto-generated sessions (auto-* prefix), or all sessions.
+
+## Input Parameters
+
+- \`mode\` (enum: "stale" | "auto" | "all", required) — Filter mode
+  - \`stale\`: Sessions where the Chrome tab no longer exists OR lastUsed is older than maxAgeDays
+  - \`auto\`: Sessions with "auto-" prefix in their ID
+  - \`all\`: Every registered session
+- \`maxAgeDays\` (number, default 7) — For "stale" mode: sessions older than this are removed
+- \`closeTabs\` (boolean, default true) — Whether to close Chrome tabs for removed sessions
+
+## Output
+
+\`\`\`json
+{
+  "removed": ["auto-abc", "auto-def", "old-session"],
+  "count": 3,
+  "tabsClosed": 2
+}
+\`\`\`
+
+## Example
+
+\`\`\`json
+{
+  "mode": "stale"
+}
+\`\`\``,
+
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        mode: {
+          type: "string",
+          enum: ["stale", "auto", "all"],
+          description: "Filter mode: stale (dead tabs or old), auto (auto-* prefix), all"
+        },
+        maxAgeDays: {
+          type: "number",
+          description: "For stale mode: max age in days before a session is considered stale (default: 7)"
+        },
+        closeTabs: {
+          type: "boolean",
+          description: "Whether to close Chrome tabs for removed sessions (default: true)"
+        }
+      },
+      required: ["mode"]
+    },
+
+    handler: async (args: Record<string, any>, ctx: { storage: Storage }): Promise<any> => {
+      const { mode, maxAgeDays = 7, closeTabs = true } = args;
+
+      if (!['stale', 'auto', 'all'].includes(mode)) {
+        throw new Error('mode must be one of: stale, auto, all');
+      }
+
+      const sessionManager = await getSessionManager();
+      const sessions = sessionManager.listSessions();
+      const port = parseInt(process.env.CDP_PORT || '9222');
+
+      // Get live targets for stale detection
+      let liveTargetIds = new Set<string>();
+      try {
+        const tmpClient = await CDP({ port });
+        const { targetInfos = [] } = await tmpClient.Target.getTargets();
+        for (const t of targetInfos) {
+          liveTargetIds.add(t.targetId);
+        }
+        await tmpClient.close();
+      } catch {
+        // Chrome not running — all tabs considered dead
+      }
+
+      const now = Date.now();
+      const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+
+      // Filter sessions based on mode
+      const toRemove = sessions.filter(s => {
+        if (mode === 'all') return true;
+        if (mode === 'auto') return s.sessionId.startsWith('auto-');
+        if (mode === 'stale') {
+          const tabDead = !liveTargetIds.has(s.targetId);
+          const tooOld = (now - new Date(s.lastUsed).getTime()) > maxAgeMs;
+          return tabDead || tooOld;
+        }
+        return false;
+      });
+
+      // Close tabs and unregister
+      let tabsClosed = 0;
+      let closeTmpClient: any = null;
+
+      if (closeTabs && toRemove.length > 0) {
+        try {
+          closeTmpClient = await CDP({ port });
+        } catch {
+          // Chrome not running
+        }
+      }
+
+      for (const s of toRemove) {
+        if (closeTabs && closeTmpClient && liveTargetIds.has(s.targetId)) {
+          try {
+            await closeTmpClient.Target.closeTarget({ targetId: s.targetId });
+            tabsClosed++;
+          } catch {
+            // Tab may already be closed
+          }
+        }
+        await sessionManager.unregisterSession(s.sessionId);
+      }
+
+      if (closeTmpClient) {
+        try { await closeTmpClient.close(); } catch { /* ignore */ }
+      }
+
+      return {
+        removed: toRemove.map(s => s.sessionId),
+        count: toRemove.length,
+        tabsClosed
+      };
     }
   };
 
@@ -2108,6 +2358,8 @@ Returns:
     validateTestEditTool,
     registerSessionTool,
     listSessionsTool,
+    unregisterSessionTool,
+    cleanupSessionsTool,
     getStepDomTool,
   ];
 
@@ -2133,15 +2385,16 @@ Returns:
           const port = (portArg as number) ?? 9222;
           const initialVars = inputValues as Record<string, unknown> | undefined;
 
-          // Force session management for all tests
-          // Auto-generate session ID if not provided
-          const sessionId = (userSessionId && typeof userSessionId === 'string' && userSessionId.trim())
-            ? userSessionId.trim()
-            : `auto-${Date.now()}`;
+          // Validate required sessionId
+          if (!userSessionId || typeof userSessionId !== 'string' || !userSessionId.trim()) {
+            return {
+              content: [{ type: "text", text: JSON.stringify({ success: false, error: "sessionId is required. Provide a session ID (e.g., 'my-session') to control which Chrome tab is used for this test run." }, null, 2) }],
+            };
+          }
+          const sessionId = userSessionId.trim();
 
-          // Always initialize session manager
-          const sessionManager = new SessionManager(storageDir);
-          await sessionManager.load();
+          // Use shared session manager (prevents concurrent runs from overwriting each other's sessions)
+          const sessionManager = await getSessionManager();
 
           // Determine which mode to use
           if (testId) {
@@ -2166,11 +2419,14 @@ Returns:
             // Save the result
             const testRun = await storage.saveRun(testId, result);
 
+            // Get session tab info for diagnostics
+            const targetId = sessionManager.getTargetId(sessionId);
+
             return {
               content: [
                 {
                   type: "text" as const,
-                  text: summarizeResult(result, { testId, runId: testRun.id }),
+                  text: summarizeResult(result, { testId, runId: testRun.id, sessionId, targetId }),
                 },
               ],
             };
@@ -2192,11 +2448,14 @@ Returns:
             const testData = parseResult.data as TestDef;
             const result = await runTest(testData, port, undefined, undefined, initialVars, false, sessionId, sessionManager);
 
+            // Get session tab info for diagnostics
+            const targetId = sessionManager.getTargetId(sessionId);
+
             return {
               content: [
                 {
                   type: "text" as const,
-                  text: summarizeResult(result),
+                  text: summarizeResult(result, { sessionId, targetId }),
                 },
               ],
             };

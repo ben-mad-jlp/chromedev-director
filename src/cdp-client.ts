@@ -195,11 +195,12 @@ export class CDPClient {
       }
     }
 
-    // Tab doesn't exist or verification failed, create new one
+    // Tab doesn't exist or verification failed, create new one.
+    // Use background:true to avoid stealing focus from other sessions' tabs.
     const { targetId } = await this.domains.Target.createTarget({
       url: "about:blank",
       newWindow: false,
-      background: false
+      background: true
     });
 
     // Store in registry — if this fails, clean up the orphaned tab
@@ -246,63 +247,52 @@ export class CDPClient {
       this.dialogHandler = undefined;
       this.sessionTabCreated = false;
 
-      // Connect to the Chrome DevTools Protocol
-      this.client = await CDP({ port: this.port });
-
-      // Get list of targets (pages/tabs)
-      const { Target, Page, Console, Network, Fetch, DOM, Runtime, Input } =
-        this.client;
-
-      // Store domain instances
-      this.domains = {
-        Target,
-        Page,
-        Console,
-        Network,
-        Fetch,
-        DOM,
-        Runtime,
-        Input,
-      };
-
-      // Determine target: 1) session tab, 2) create new tab, 3) find existing page
+      // Determine target strategy and connect accordingly
       let targetId: string;
 
-      // 1. Try to find session's existing tab
       if (this.sessionId && this.sessionManager) {
+        // SESSION MODE: Each session connects directly to its own page's WebSocket.
+        // This avoids session multiplexing issues where chrome-remote-interface
+        // routes all commands to the wrong tab when multiple clients share a connection.
+
+        // Step 1: Use a temporary connection to find/create the session's tab
+        const tmpClient = await CDP({ port: this.port });
+        this.domains = { Target: tmpClient.Target } as any;
         targetId = await this.findOrCreateSessionTab(this.sessionId);
-      }
-      // 2. Create new tab if requested
-      else if (this.createTab) {
-        const created = await Target.createTarget({ url: "about:blank" });
-        targetId = created.targetId;
-        this.ownedTargetId = targetId;
-      }
-      // 3. Fall back to first available page (backward compat)
-      else {
-        const targets = await Target.getTargets();
-        if (!targets.targetInfos || targets.targetInfos.length === 0) {
-          throw new Error("No targets available");
+        await tmpClient.close();
+
+        // Step 2: Connect directly to the session's tab WebSocket
+        this.client = await CDP({ port: this.port, target: targetId });
+
+        const { Target, Page, Console, Network, Fetch, DOM, Runtime, Input } = this.client;
+        this.domains = { Target, Page, Console, Network, Fetch, DOM, Runtime, Input };
+      } else {
+        // NON-SESSION MODE: Connect to a page target directly (backward compat)
+        this.client = await CDP({ port: this.port });
+
+        const { Target, Page, Console, Network, Fetch, DOM, Runtime, Input } = this.client;
+        this.domains = { Target, Page, Console, Network, Fetch, DOM, Runtime, Input };
+
+        if (this.createTab) {
+          const created = await Target.createTarget({ url: "about:blank" });
+          targetId = created.targetId;
+          this.ownedTargetId = targetId;
+        } else {
+          const targets = await Target.getTargets();
+          if (!targets.targetInfos || targets.targetInfos.length === 0) {
+            throw new Error("No targets available");
+          }
+          const pageTarget = targets.targetInfos.find((t: any) => t.type === "page");
+          targetId = pageTarget ? pageTarget.targetId : targets.targetInfos[0].targetId;
         }
 
-        const pageTarget = targets.targetInfos.find(
-          (t: any) => t.type === "page"
-        );
-        targetId = pageTarget
-          ? pageTarget.targetId
-          : targets.targetInfos[0].targetId;
+        // Attach to the target
+        const { sessionId } = await Target.attachToTarget({ targetId, flatten: true });
+        this.client.sessionId = sessionId;
       }
 
-      // Attach to the target to get a sessionId
-      const { sessionId } = await Target.attachToTarget({
-        targetId,
-        flatten: true,
-      });
-
-      // Store the session ID for later use
-      this.client.sessionId = sessionId;
-
-      // Enable domains
+      // Enable domains (use this.domains since local vars are block-scoped)
+      const { Console, Network, Page, DOM, Runtime, Fetch } = this.domains;
       await Console.enable();
       await Network.enable();
       await Page.enable();
