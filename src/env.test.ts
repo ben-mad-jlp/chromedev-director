@@ -74,6 +74,62 @@ describe("interpolate", () => {
     });
   });
 
+  describe("$vars nested dot-path patterns", () => {
+    it("resolves $vars.a.b to nested value", () => {
+      const result = interpolate("id: $vars.env.id", {}, { env: { id: "env-123" } });
+      expect(result).toBe("id: env-123");
+    });
+
+    it("resolves deeply nested paths $vars.a.b.c", () => {
+      const result = interpolate("val: $vars.a.b.c", {}, { a: { b: { c: "deep" } } });
+      expect(result).toBe("val: deep");
+    });
+
+    it("leaves unresolvable nested path as-is when root key missing", () => {
+      const result = interpolate("val: $vars.missing.id", {}, {});
+      expect(result).toBe("val: $vars.missing.id");
+    });
+
+    it("leaves unresolvable nested path as-is when intermediate is not object", () => {
+      const result = interpolate("val: $vars.str.id", {}, { str: "hello" });
+      expect(result).toBe("val: $vars.str.id");
+    });
+
+    it("leaves unresolvable nested path as-is when leaf key missing", () => {
+      const result = interpolate("val: $vars.env.missing", {}, { env: { id: "123" } });
+      expect(result).toBe("val: $vars.env.missing");
+    });
+
+    it("resolves nested path with numeric value", () => {
+      const result = interpolate("port: $vars.env.port", {}, { env: { port: 3002 } });
+      expect(result).toBe("port: 3002");
+    });
+
+    it("works alongside flat vars in the same template", () => {
+      const result = interpolate(
+        "url: $vars.base?envId=$vars.env.id",
+        {},
+        { base: "http://localhost:8081", env: { id: "env-abc" } }
+      );
+      expect(result).toBe("url: http://localhost:8081?envId=env-abc");
+    });
+
+    it("single-level keys still work (backward compat)", () => {
+      const result = interpolate("count: $vars.count", {}, { count: 42 });
+      expect(result).toBe("count: 42");
+    });
+
+    it("JSON-serializes nested object when path resolves to object", () => {
+      const result = interpolate("data: $vars.env", {}, { env: { id: "abc", port: 3002 } });
+      expect(result).toBe('data: {"id":"abc","port":3002}');
+    });
+
+    it("resolves null intermediate as match (leaves as-is)", () => {
+      const result = interpolate("val: $vars.env.id", {}, { env: null });
+      expect(result).toBe("val: $vars.env.id");
+    });
+  });
+
   describe("combined patterns", () => {
     it("processes $env.KEY before $vars.KEY", () => {
       const result = interpolate(
@@ -491,6 +547,104 @@ describe("interpolateStep", () => {
           match: "/api/test",
           status: 200,
         },
+      });
+    });
+  });
+
+  describe("http_request step", () => {
+    it("interpolates url", () => {
+      const step = interpolateStep(
+        { http_request: { url: "http://localhost:3001/api/envs/$vars.env.id", method: "DELETE" } } as any,
+        {},
+        { env: { id: "env-abc" } }
+      );
+      expect(step).toEqual({
+        http_request: { url: "http://localhost:3001/api/envs/env-abc", method: "DELETE" },
+      });
+    });
+
+    it("interpolates string body", () => {
+      const step = interpolateStep(
+        { http_request: { url: "http://localhost/api", method: "POST", body: '{"id":"$vars.envId"}' } } as any,
+        {},
+        { envId: "env-123" }
+      );
+      expect(step).toEqual({
+        http_request: { url: "http://localhost/api", method: "POST", body: '{"id":"env-123"}' },
+      });
+    });
+
+    it("interpolates $vars in object body string values", () => {
+      const step = interpolateStep(
+        {
+          http_request: {
+            url: "http://localhost/api",
+            method: "POST",
+            body: { workflow: "picking", envId: "$vars.env.id" },
+          },
+        } as any,
+        {},
+        { env: { id: "env-xyz" } }
+      );
+      expect(step).toEqual({
+        http_request: {
+          url: "http://localhost/api",
+          method: "POST",
+          body: { workflow: "picking", envId: "env-xyz" },
+        },
+      });
+    });
+
+    it("interpolates nested object body values", () => {
+      const step = interpolateStep(
+        {
+          http_request: {
+            url: "http://localhost/api",
+            method: "POST",
+            body: { config: { name: "$env.NAME" }, ids: ["$vars.id1", "$vars.id2"] },
+          },
+        } as any,
+        { NAME: "test" },
+        { id1: "a", id2: "b" }
+      );
+      expect(step).toEqual({
+        http_request: {
+          url: "http://localhost/api",
+          method: "POST",
+          body: { config: { name: "test" }, ids: ["a", "b"] },
+        },
+      });
+    });
+
+    it("preserves non-string body values (numbers, booleans)", () => {
+      const step = interpolateStep(
+        {
+          http_request: {
+            url: "http://localhost/api",
+            method: "POST",
+            body: { count: 5, active: true, label: "$vars.label" },
+          },
+        } as any,
+        {},
+        { label: "test" }
+      );
+      expect(step).toEqual({
+        http_request: {
+          url: "http://localhost/api",
+          method: "POST",
+          body: { count: 5, active: true, label: "test" },
+        },
+      });
+    });
+
+    it("preserves as field", () => {
+      const step = interpolateStep(
+        { http_request: { url: "http://localhost/api", as: "result" } } as any,
+        {},
+        {}
+      );
+      expect(step).toEqual({
+        http_request: { url: "http://localhost/api", as: "result" },
       });
     });
   });

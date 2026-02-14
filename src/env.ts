@@ -20,6 +20,27 @@ function stringifyValue(value: unknown): string {
 }
 
 /**
+ * Recursively interpolates all string values within an object or array.
+ * Non-string leaves are returned as-is.
+ */
+function interpolateObject(
+  obj: unknown,
+  env: Record<string, unknown>,
+  vars: Record<string, unknown>
+): unknown {
+  if (typeof obj === "string") return interpolate(obj, env, vars);
+  if (Array.isArray(obj)) return obj.map(item => interpolateObject(item, env, vars));
+  if (obj != null && typeof obj === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = interpolateObject(value, env, vars);
+    }
+    return result;
+  }
+  return obj;
+}
+
+/**
  * Set of var keys that have been synced to window.__cdp_vars in the browser.
  * When a key is in this set, $vars.KEY interpolation in eval expressions
  * emits `window.__cdp_vars.KEY` instead of inlining the JSON — keeping
@@ -86,18 +107,26 @@ export function interpolate(
     return match;
   });
 
-  // Replace $vars.KEY patterns (runs after $env to allow env vars in vars)
-  result = result.replace(/\$vars\.([a-zA-Z_][a-zA-Z0-9_]*)/g, (match, key) => {
-    if (key in vars) {
-      // For vars synced to the browser (loop variables with complex values),
-      // emit a window.__cdp_vars reference instead of inlining the JSON.
-      // This prevents eval expressions from growing exponentially in nested loops.
-      if (browserSyncedVars.has(key)) {
-        return `window.__cdp_vars[${JSON.stringify(key)}]`;
-      }
-      return stringifyValue(vars[key]);
+  // Replace $vars.KEY and $vars.KEY.nested.path patterns (runs after $env to allow env vars in vars)
+  result = result.replace(/\$vars\.((?:[a-zA-Z_][a-zA-Z0-9_]*)(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)/g, (match, key) => {
+    const parts = key.split('.');
+    const rootKey = parts[0];
+
+    // For vars synced to the browser (loop variables with complex values),
+    // emit a window.__cdp_vars reference instead of inlining the JSON.
+    // This prevents eval expressions from growing exponentially in nested loops.
+    if (browserSyncedVars.has(rootKey)) {
+      return `window.__cdp_vars[${JSON.stringify(rootKey)}]${parts.slice(1).map((p: string) => `[${JSON.stringify(p)}]`).join('')}`;
     }
-    return match;
+
+    // Walk the dot-path to resolve nested values
+    let value: unknown = vars;
+    for (const part of parts) {
+      if (value == null || typeof value !== 'object') return match;
+      value = (value as Record<string, unknown>)[part];
+    }
+    if (value === undefined) return match;
+    return stringifyValue(value);
   });
 
   return result;
@@ -318,7 +347,7 @@ export function interpolateStep(
         ...(step.http_request.body != null
           ? { body: typeof step.http_request.body === "string"
               ? interpolate(step.http_request.body, env, vars)
-              : step.http_request.body }
+              : interpolateObject(step.http_request.body, env, vars) }
           : {}),
         ...(step.http_request.headers != null ? { headers: step.http_request.headers } : {}),
         ...(step.http_request.as != null ? { as: step.http_request.as } : {}),

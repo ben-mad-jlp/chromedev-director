@@ -180,7 +180,7 @@ async function runTestInner(
   projectRoot: string,
   context: RunContext
 ): Promise<TestResult> {
-  // Connect to Chrome
+  // Connect to Chrome (URL param unused by CDPClient — real navigation happens after before hooks)
   await client.connect(testDef.url);
 
   const beforeHooks = testDef.before || [];
@@ -257,8 +257,8 @@ async function runTestInner(
     emit(onEvent, { type: "step:pass", stepIndex: -(i + 1), label, nested: null, duration_ms: duration });
   }
 
-  // Navigate to the test URL (after mock rules are set up)
-  await client.navigate(testDef.url);
+  // Navigate to the test URL (after mock rules are set up, interpolate for $vars from before hooks)
+  await client.navigate(interpolate(testDef.url, testDef.env || {}, vars));
 
   // Verify page loaded correctly (if verify_page is configured)
   if (testDef.verify_page) {
