@@ -7,7 +7,7 @@ import { useTestStore } from '@/stores/test-store';
 import { useRunStore } from '@/stores/run-store';
 import { useUIStore } from '@/stores/ui-store';
 import { connectWebSocket, subscribeToWebSocket } from '@/lib/ws';
-import { getChromeStatus } from '@/lib/api';
+import { getChromeStatus, getActiveRun } from '@/lib/api';
 
 /**
  * App Component - Main application with routing and initialization
@@ -91,10 +91,41 @@ const App: React.FC = () => {
         });
         unsubscribers.push(unsubscribe5);
 
+        const unsubscribe6 = subscribeToWebSocket('run:paused', (data) => {
+          handleWsMessage({
+            type: 'run:paused',
+            testId: data.testId,
+            runId: data.runId,
+            stepIndex: data.stepIndex,
+            totalSteps: data.totalSteps,
+          });
+        });
+        unsubscribers.push(unsubscribe6);
+
+        const unsubscribe7 = subscribeToWebSocket('run:resumed', (data) => {
+          handleWsMessage({
+            type: 'run:resumed',
+            testId: data.testId,
+            runId: data.runId,
+          });
+        });
+        unsubscribers.push(unsubscribe7);
+
         // 3. Fetch initial test list
         console.log('[App] Fetching tests...');
         await fetchTests();
         console.log('[App] Tests loaded');
+
+        // 3.5. Restore active run state (e.g., paused debug session survived a page reload)
+        try {
+          const { activeRun } = await getActiveRun();
+          if (activeRun) {
+            useRunStore.getState().restoreActiveRun(activeRun.testId, activeRun.runId, activeRun.isPaused);
+            console.log('[App] Restored active run:', activeRun.runId, activeRun.isPaused ? '(paused)' : '(running)');
+          }
+        } catch {
+          // Non-critical — continue
+        }
       } catch (error) {
         console.error('[App] Initialization error:', error);
         // Continue even if WebSocket or fetch fails - show graceful degradation

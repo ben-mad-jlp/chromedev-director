@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Play } from 'lucide-react';
 import type { StepDef } from '@/lib/types';
 
 export interface StepCardProps {
   step: StepDef;
   index: number;
   status?: 'pending' | 'running' | 'passed' | 'failed';
+  isPausedAt?: boolean;
+  onRunTo?: (stepIndex: number) => void;
 }
 
 /**
@@ -1104,6 +1106,8 @@ export const StepCard: React.FC<StepCardProps> = ({
   step,
   index,
   status,
+  isPausedAt,
+  onRunTo,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const stepType = getStepType(step);
@@ -1119,7 +1123,9 @@ export const StepCard: React.FC<StepCardProps> = ({
     passed: 'border-l-4 border-l-green-500 bg-green-50',
     failed: 'border-l-4 border-l-red-500 bg-red-50',
   };
-  const statusBorderClass = statusBorderMap[status || 'pending'];
+  const statusBorderClass = isPausedAt
+    ? 'border-l-4 border-l-amber-500 bg-amber-50 ring-2 ring-amber-300'
+    : statusBorderMap[status || 'pending'];
 
   const statusIconMap: Record<'running' | 'passed' | 'failed' | 'pending', string> = {
     running: '⟳',
@@ -1192,12 +1198,26 @@ export const StepCard: React.FC<StepCardProps> = ({
           {isExpanded && fullDetails}
         </div>
 
-        {/* Status icon */}
-        {status && statusIcon && (
-          <div className={`flex-shrink-0 text-lg font-semibold ${statusText}`}>
-            {statusIcon}
-          </div>
-        )}
+        {/* Status icon or run-to button */}
+        <div className="flex-shrink-0 flex items-center gap-1">
+          {status && statusIcon && (
+            <div className={`text-lg font-semibold ${statusText}`}>
+              {statusIcon}
+            </div>
+          )}
+          {onRunTo && !isPausedAt && (!status || status === 'pending') && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRunTo(index);
+              }}
+              className="p-1 rounded text-amber-600 hover:bg-amber-100 transition-colors"
+              title={`Run to step ${index + 1}`}
+            >
+              <Play className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
     </Card>
   );

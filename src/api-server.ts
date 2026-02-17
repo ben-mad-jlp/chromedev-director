@@ -18,6 +18,7 @@ import { runSuite, OnSuiteEvent, SuiteEvent } from './suite-runner.js';
 import { SessionManager } from './session-manager.js';
 import { CDPClient } from './cdp-client.js';
 import { generateTestFlowDiagram } from './diagram-generator.js';
+import { DebugController } from './debug-controller.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,6 +50,8 @@ export type WsMessage =
       error?: string;
     }
   | { type: 'run:complete'; testId: string; runId: string; status: 'passed' | 'failed' }
+  | { type: 'run:paused'; testId: string; runId: string; stepIndex: number; totalSteps: number }
+  | { type: 'run:resumed'; testId: string; runId: string }
   | { type: 'suite:start'; total: number }
   | { type: 'suite:test_start'; testId: string; testName: string; index: number }
   | { type: 'suite:test_complete'; testId: string; testName: string; index: number; status: 'passed' | 'failed' | 'skipped'; duration_ms: number; error?: string }
@@ -84,6 +87,9 @@ export function createApiServer(options: GuiOptions): { app: Hono; injectWebSock
 
   // Track active run
   let activeRun: ActiveRun | null = null;
+
+  // Debug session registry — maps runId to DebugController
+  const debugSessions = new Map<string, DebugController>();
 
   // WebSocket client tracking
   const clients = new Set<any>();
@@ -134,6 +140,36 @@ export function createApiServer(options: GuiOptions): { app: Hono; injectWebSock
   app.get('/ws', nodeWs.upgradeWebSocket((c: any) => ({
     onOpen(evt: any, ws: any) {
       clients.add(ws);
+    },
+    onMessage(evt: any, ws: any) {
+      try {
+        const msg = JSON.parse(typeof evt.data === 'string' ? evt.data : evt.data.toString());
+        if (!msg.type || !msg.runId) return;
+
+        const controller = debugSessions.get(msg.runId);
+        if (!controller) return;
+
+        const run = activeRun;
+        if (!run || run.runId !== msg.runId) return;
+
+        if (msg.type === 'debug:step') {
+          controller.step();
+          // run:resumed is broadcast by the onResume callback when gate() resolves
+        } else if (msg.type === 'debug:continue') {
+          controller.continue();
+          // run:resumed is broadcast by the onResume callback when gate() resolves
+        } else if (msg.type === 'debug:run-to') {
+          const targetStep = typeof msg.stepIndex === 'number' ? msg.stepIndex : null;
+          if (targetStep != null) {
+            controller.runTo(targetStep);
+            // run:resumed is broadcast by the onResume callback when gate() resolves
+          }
+        } else if (msg.type === 'debug:stop') {
+          controller.stop();
+        }
+      } catch {
+        // Ignore malformed messages
+      }
     },
     onClose(evt: any, ws: any) {
       clients.delete(ws);
@@ -468,7 +504,9 @@ export function createApiServer(options: GuiOptions): { app: Hono; injectWebSock
       const testId = c.req.param('id');
       const body = await c.req.json() as any;
       const cdpPortOverride = body.port ?? options.cdpPort;
-      const sessionId = body.sessionId; // Add sessionId extraction
+      const sessionId = body.sessionId;
+      const stepDelay = typeof body.stepDelay === 'number' ? body.stepDelay : 0;
+      const debugMode = body.debug === true;
 
       // Step 1: Check activeRun mutex — prevent concurrent execution
       if (activeRun) {
@@ -573,7 +611,33 @@ export function createApiServer(options: GuiOptions): { app: Hono; injectWebSock
           // Console and network events are not broadcasted in the current design
         };
 
-        // Step 6: Call runTest() with onEvent handler, merged inputs, and session
+        // Step 6: Create DebugController if stepDelay or debug mode requested
+        let debugController: DebugController | undefined;
+        if (stepDelay > 0 || debugMode) {
+          debugController = new DebugController({
+            stepDelay,
+            debug: debugMode,
+            onPause: (stepIndex, totalSteps) => {
+              broadcast({
+                type: 'run:paused',
+                testId,
+                runId,
+                stepIndex,
+                totalSteps,
+              });
+            },
+            onResume: () => {
+              broadcast({
+                type: 'run:resumed',
+                testId,
+                runId,
+              });
+            },
+          });
+          debugSessions.set(runId, debugController);
+        }
+
+        // Step 7: Call runTest() with onEvent handler, merged inputs, session, and debug controller
         const shouldCreateTab = false; // Don't create tabs in GUI
         const result = await runTest(
           test.definition,
@@ -583,13 +647,14 @@ export function createApiServer(options: GuiOptions): { app: Hono; injectWebSock
           mergedInputs,
           shouldCreateTab,
           sessionId,
-          sessionManagerInstance
+          sessionManagerInstance,
+          debugController
         );
 
-        // Step 7: Save result to storage
+        // Step 8: Save result to storage
         const savedRun = await storage.saveRun(config.storageDir, testId, result);
 
-        // Step 8: Broadcast run:complete event
+        // Step 9: Broadcast run:complete event
         broadcast({
           type: 'run:complete',
           testId,
@@ -599,7 +664,8 @@ export function createApiServer(options: GuiOptions): { app: Hono; injectWebSock
 
         return c.json({ runId, result: savedRun }, 200);
       } finally {
-        // Always clear activeRun, even if execution fails
+        // Always clear activeRun and debug session, even if execution fails
+        debugSessions.delete(runId);
         activeRun = null;
       }
     } catch (error: any) {
@@ -656,6 +722,90 @@ export function createApiServer(options: GuiOptions): { app: Hono; injectWebSock
       activeRun = null;
       throw error;
     }
+  });
+
+  /**
+   * POST /api/runs/:runId/debug/step — Advance one step (REST fallback)
+   */
+  app.post('/api/runs/:runId/debug/step', (c: any) => {
+    const runId = c.req.param('runId');
+    const controller = debugSessions.get(runId);
+    if (!controller) return c.json({ error: 'No active debug session for this run' }, 404);
+    controller.step();
+    // run:resumed is broadcast by the onResume callback when gate() resolves
+    return c.json({ ok: true });
+  });
+
+  /**
+   * POST /api/runs/:runId/debug/continue — Resume running (REST fallback)
+   */
+  app.post('/api/runs/:runId/debug/continue', (c: any) => {
+    const runId = c.req.param('runId');
+    const controller = debugSessions.get(runId);
+    if (!controller) return c.json({ error: 'No active debug session for this run' }, 404);
+    controller.continue();
+    // run:resumed is broadcast by the onResume callback when gate() resolves
+    return c.json({ ok: true });
+  });
+
+  /**
+   * POST /api/runs/:runId/debug/run-to — Run to a specific step (REST fallback)
+   * Body: { stepIndex: number }
+   */
+  app.post('/api/runs/:runId/debug/run-to', async (c: any) => {
+    const runId = c.req.param('runId');
+    const controller = debugSessions.get(runId);
+    if (!controller) return c.json({ error: 'No active debug session for this run' }, 404);
+    const body = await c.req.json() as any;
+    const targetStep = typeof body.stepIndex === 'number' ? body.stepIndex : null;
+    if (targetStep == null) return c.json({ error: 'stepIndex is required' }, 400);
+    controller.runTo(targetStep);
+    return c.json({ ok: true });
+  });
+
+  /**
+   * POST /api/runs/:runId/debug/stop — Stop the test (REST fallback)
+   */
+  app.post('/api/runs/:runId/debug/stop', (c: any) => {
+    const runId = c.req.param('runId');
+    const controller = debugSessions.get(runId);
+    if (!controller) return c.json({ error: 'No active debug session for this run' }, 404);
+    controller.stop();
+    return c.json({ ok: true });
+  });
+
+  /**
+   * GET /api/active-run — Check if a test run is currently active
+   * Returns the active run info or null. Used by GUI to restore state on reconnect.
+   */
+  app.get('/api/active-run', (c: any) => {
+    if (!activeRun) {
+      return c.json({ activeRun: null });
+    }
+    const controller = debugSessions.get(activeRun.runId);
+    return c.json({
+      activeRun: {
+        testId: activeRun.testId,
+        runId: activeRun.runId,
+        isPaused: controller?.isPaused ?? false,
+      },
+    });
+  });
+
+  /**
+   * POST /api/active-run/stop — Force-stop the current run
+   * Stops any debug controller and allows the mutex to be released.
+   * Use when a stuck/paused run is blocking new runs.
+   */
+  app.post('/api/active-run/stop', (c: any) => {
+    if (!activeRun) {
+      return c.json({ error: 'No active run' }, 404);
+    }
+    const controller = debugSessions.get(activeRun.runId);
+    if (controller) {
+      controller.stop();
+    }
+    return c.json({ ok: true, stoppedRunId: activeRun.runId });
   });
 
   /**

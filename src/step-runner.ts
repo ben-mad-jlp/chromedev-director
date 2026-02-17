@@ -9,6 +9,7 @@ import { CDPClient } from "./cdp-client.js";
 import { SessionManager } from "./session-manager.js";
 import { STEP_REGISTRY } from "./steps/registry.js";
 import { emit, RunContext } from "./steps/_utils.js";
+import { DebugController } from "./debug-controller.js";
 
 /**
  * Verify the page loaded correctly after navigation.
@@ -114,7 +115,7 @@ function getStepType(step: StepDef): string {
  * @param projectRoot - Project root for resolving nested test IDs (default: process.cwd())
  * @returns The test result with execution status, errors, and diagnostics
  */
-export async function runTest(testDef: TestDef, port: number = 9222, onEvent?: OnEvent, projectRoot: string = process.cwd(), initialVars?: Record<string, unknown>, createTab?: boolean, sessionId?: string, sessionManager?: SessionManager): Promise<TestResult> {
+export async function runTest(testDef: TestDef, port: number = 9222, onEvent?: OnEvent, projectRoot: string = process.cwd(), initialVars?: Record<string, unknown>, createTab?: boolean, sessionId?: string, sessionManager?: SessionManager, debugController?: DebugController): Promise<TestResult> {
   const client = new CDPClient(port, undefined, {
     createTab: createTab ?? false,
     sessionId,
@@ -122,7 +123,9 @@ export async function runTest(testDef: TestDef, port: number = 9222, onEvent?: O
   });
   const vars: Record<string, unknown> = { ...initialVars };
   const startTime = Date.now();
-  const testTimeout = testDef.timeout ?? 30000;
+  // When debug mode is active, disable timeout to prevent timeout during pause
+  // Use max 32-bit signed int (~24.8 days) to avoid setTimeout overflow
+  const testTimeout = debugController ? 2147483647 : (testDef.timeout ?? 30000);
   const context: RunContext = { visitedTests: new Set() };
 
   // Create a timeout promise that rejects after the configured timeout
@@ -134,7 +137,7 @@ export async function runTest(testDef: TestDef, port: number = 9222, onEvent?: O
   });
 
   // Track the inner promise so we can catch its rejection if timeout wins
-  const innerPromise = runTestInner(testDef, client, vars, startTime, onEvent, projectRoot, context);
+  const innerPromise = runTestInner(testDef, client, vars, startTime, onEvent, projectRoot, context, debugController);
 
   try {
     const result = await Promise.race([
@@ -178,7 +181,8 @@ async function runTestInner(
   startTime: number,
   onEvent: OnEvent | undefined,
   projectRoot: string,
-  context: RunContext
+  context: RunContext,
+  debugController?: DebugController
 ): Promise<TestResult> {
   // Connect to Chrome (URL param unused by CDPClient — real navigation happens after before hooks)
   await client.connect(testDef.url);
@@ -348,6 +352,30 @@ async function runTestInner(
 
   // Run main steps with lazy interpolation (one at a time, so $vars are up-to-date)
   for (let i = startIndex; i < testDef.steps.length; i++) {
+    // Debug gate — pause before each step if in debug/step mode
+    if (debugController) {
+      try {
+        await debugController.gate(i, testDef.steps.length);
+      } catch (err) {
+        // "Stopped by user" — run after hooks and return failed
+        // Stop was requested — fall through to run after hooks and return failed
+        await runAfterHooks(testDef.after || [], testDef.env || {}, client, vars, onEvent, projectRoot, context);
+        const consoleMessages = await safeGetConsoleMessages(client);
+        const networkResponses = await safeGetNetworkResponses(client);
+        return {
+          status: "failed",
+          failed_step: i,
+          step_definition: testDef.steps[i] || { eval: "" },
+          error: err instanceof Error ? err.message : String(err),
+          console_errors: consoleMessages.map(m => m.text),
+          duration_ms: Date.now() - startTime,
+          console_log: consoleMessages,
+          network_log: networkResponses,
+          ...(Object.keys(domSnapshots).length > 0 ? { dom_snapshots: domSnapshots } : {}),
+        };
+      }
+    }
+
     const rawStep = testDef.steps[i];
     const label = rawStep.label || `Step ${i + 1}`;
     const stepStartTime = Date.now();
@@ -456,7 +484,8 @@ export async function runSteps(
   client: CDPClientInterface,
   testDef: TestDef,
   onEvent?: OnEvent,
-  projectRoot: string = process.cwd()
+  projectRoot: string = process.cwd(),
+  debugController?: DebugController
 ): Promise<TestResult> {
   const startTime = Date.now();
   const context: RunContext = { visitedTests: new Set() };
@@ -555,6 +584,26 @@ export async function runSteps(
 
   // Execute steps with lazy interpolation
   for (let i = startIndex; i < testDef.steps.length; i++) {
+    // Debug gate — pause before each step if in debug/step mode
+    if (debugController) {
+      try {
+        await debugController.gate(i, testDef.steps.length);
+      } catch (err) {
+        // Stop was requested — fall through to run after hooks and return failed
+        await runAfterHooks(testDef.after || [], testDef.env || {}, client, vars, onEvent, projectRoot);
+        const diagnostics = await collectDiagnostics(client, domSnapshots);
+        return {
+          status: "failed",
+          failed_step: i,
+          failed_label: testDef.steps[i]?.label || `Step ${i + 1}`,
+          step_definition: testDef.steps[i] || { eval: "" },
+          error: err instanceof Error ? err.message : String(err),
+          ...diagnostics,
+          duration_ms: Date.now() - startTime,
+        };
+      }
+    }
+
     const step = testDef.steps[i];
     const label = step.label || `Step ${i + 1}`;
     const stepStartTime = Date.now();

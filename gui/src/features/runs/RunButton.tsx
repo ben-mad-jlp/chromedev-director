@@ -1,6 +1,6 @@
-import { AlertCircle, Loader2 } from 'lucide-react';
+import { AlertCircle, Loader2, Pause } from 'lucide-react';
 
-export type RunButtonState = 'idle' | 'running' | 'busy' | 'chrome-offline';
+export type RunButtonState = 'idle' | 'running' | 'paused' | 'busy' | 'chrome-offline';
 
 interface RunButtonProps {
   state: RunButtonState;
@@ -27,6 +27,14 @@ export function RunButton({ state, onClick }: RunButtonProps) {
           <div className="flex items-center gap-2">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span>Running...</span>
+          </div>
+        );
+
+      case 'paused':
+        return (
+          <div className="flex items-center gap-2">
+            <Pause className="w-4 h-4" />
+            <span>Paused</span>
           </div>
         );
 
@@ -59,6 +67,9 @@ export function RunButton({ state, onClick }: RunButtonProps) {
 
       case 'running':
         return 'bg-blue-500 text-white cursor-not-allowed opacity-75';
+
+      case 'paused':
+        return 'bg-amber-500 text-white cursor-not-allowed opacity-75';
 
       case 'busy':
         return 'bg-gray-400 text-gray-200 cursor-not-allowed opacity-75';

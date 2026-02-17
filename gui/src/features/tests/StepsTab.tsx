@@ -7,6 +7,8 @@ import type { SavedTest, StepDef } from '@/lib/types';
 export interface StepsTabProps {
   test: SavedTest;
   stepStatuses?: Record<string, 'pending' | 'running' | 'passed' | 'failed'>;
+  pausedAtStep?: number | null;
+  onRunTo?: (stepIndex: number) => void;
 }
 
 /**
@@ -35,6 +37,8 @@ function getStepKey(index: number): string {
 export const StepsTab: React.FC<StepsTabProps> = ({
   test,
   stepStatuses,
+  pausedAtStep,
+  onRunTo,
 }) => {
   const { steps, before } = test.definition;
   const hasBeforeHooks = before && before.length > 0;
@@ -94,6 +98,8 @@ export const StepsTab: React.FC<StepsTabProps> = ({
                     step={step}
                     index={idx}
                     status={stepStatuses?.[getStepKey(idx)]}
+                    isPausedAt={pausedAtStep === idx}
+                    onRunTo={onRunTo && pausedAtStep != null && idx > pausedAtStep ? onRunTo : undefined}
                   />
                 )}
               </div>

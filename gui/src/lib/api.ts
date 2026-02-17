@@ -175,20 +175,32 @@ export async function getResult(
 }
 
 /**
+ * Run options for test execution
+ */
+export interface RunTestOptions {
+  stepDelay?: number;
+  debug?: boolean;
+}
+
+/**
  * Run a test by ID (triggers async execution on the server)
  * @param testId - Test ID to run
  * @param inputs - Optional runtime input values to seed as $vars
  * @param sessionId - Optional session ID for persistent Chrome tab
+ * @param options - Optional step delay and debug mode settings
  * @returns Object with runId for tracking the test execution
  */
 export async function runTest(
   testId: string,
   inputs?: Record<string, unknown>,
-  sessionId?: string
+  sessionId?: string,
+  options?: RunTestOptions
 ): Promise<{ runId: string }> {
   const body: any = {};
   if (inputs) body.inputs = inputs;
   if (sessionId) body.sessionId = sessionId;
+  if (options?.stepDelay && options.stepDelay > 0) body.stepDelay = options.stepDelay;
+  if (options?.debug) body.debug = true;
 
   return apiFetch<{ runId: string; result: TestRun }>(
     `/tests/${encodeURIComponent(testId)}/run`,
@@ -197,6 +209,27 @@ export async function runTest(
       body,
     }
   );
+}
+
+/**
+ * Get the currently active run (if any)
+ * Used to restore GUI state on page load/reconnect
+ */
+export async function getActiveRun(): Promise<{
+  activeRun: { testId: string; runId: string; isPaused: boolean } | null;
+}> {
+  return apiFetch<{ activeRun: { testId: string; runId: string; isPaused: boolean } | null }>(
+    "/active-run",
+    { method: "GET" }
+  );
+}
+
+/**
+ * Force-stop the currently active run
+ * Use when a stuck/paused run is blocking new runs
+ */
+export async function forceStopActiveRun(): Promise<void> {
+  await apiFetch<{ ok: boolean }>("/active-run/stop", { method: "POST" });
 }
 
 /**

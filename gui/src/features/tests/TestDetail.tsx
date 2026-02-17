@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { AlertCircle, Loader2, Trash2, RefreshCw } from 'lucide-react';
+import { AlertCircle, Loader2, Trash2, RefreshCw, Bug } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { RunButton, type RunButtonState } from '@/features/runs/RunButton';
+import DebugControls from '@/features/runs/DebugControls';
 import LogPanel from '@/features/runs/LogPanel';
 import RunInputsDialog from '@/components/RunInputsDialog';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -13,6 +14,8 @@ import TraceTab from '@/features/history/TraceTab';
 import FlowDiagramTab from './FlowDiagramTab';
 import type { SavedTest } from '@/lib/types';
 import * as api from '@/lib/api';
+import type { RunTestOptions } from '@/lib/api';
+import { sendDebugRunTo } from '@/lib/ws';
 import { useRunStore } from '@/stores/run-store';
 import { useTestStore } from '@/stores/test-store';
 import { useSessionStore } from '@/stores/session-store';
@@ -56,8 +59,11 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
   const [activeTab, setActiveTab] = useState<TabId>('steps');
 
   // Run store state
-  const { isRunning, logs, stepStatuses, clearLogs, lastCompletedTestId, clearLastCompleted } = useRunStore((state) => ({
+  const { isRunning, isPaused, pausedAtStep, currentRunId, logs, stepStatuses, clearLogs, lastCompletedTestId, clearLastCompleted } = useRunStore((state) => ({
     isRunning: state.isRunning,
+    isPaused: state.isPaused,
+    pausedAtStep: state.pausedAtStep,
+    currentRunId: state.currentRunId,
     logs: state.logs,
     stepStatuses: state.stepStatuses,
     clearLogs: state.clearLogs,
@@ -94,6 +100,12 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionValue, setDescriptionValue] = useState('');
   const descriptionInputRef = useRef<HTMLInputElement>(null);
+
+  // Step delay state in seconds (persisted in localStorage)
+  const [stepDelaySec, setStepDelaySec] = useState<number>(() => {
+    const saved = localStorage.getItem('chromedev-step-delay-sec');
+    return saved ? parseFloat(saved) || 0 : 0;
+  });
 
   // Reusable fetch function — called on mount and by refresh button
   const fetchTest = async () => {
@@ -165,6 +177,7 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
   // Determine RunButton state
   const getRunButtonState = (): RunButtonState => {
     if (!chromeConnected) return 'chrome-offline';
+    if (isPaused) return 'paused';
     if (isRunning) return 'running';
     return 'idle';
   };
@@ -181,13 +194,55 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
     await executeRun();
   };
 
-  // Execute the test run with optional input values
-  const executeRun = async (inputValues?: Record<string, unknown>) => {
+  // Track whether the next inputs dialog submission should trigger debug mode
+  const pendingDebugRef = useRef(false);
+
+  // Handle debug button click — run with debug mode enabled
+  const handleDebugTest = async () => {
     if (!test) return;
 
+    if (test.definition.inputs && test.definition.inputs.length > 0) {
+      // For debug, we still need inputs — show dialog then run with debug
+      setShowInputsDialog(true);
+      pendingDebugRef.current = true;
+      return;
+    }
+
+    const delayMs = Math.round(stepDelaySec * 1000);
+    await executeRun(undefined, { debug: true, stepDelay: delayMs });
+  };
+
+  // Execute the test run with optional input values and run options
+  const executeRun = async (inputValues?: Record<string, unknown>, options?: RunTestOptions) => {
+    if (!test) return;
+
+    const delayMs = Math.round(stepDelaySec * 1000);
+    const runOptions: RunTestOptions = { ...options };
+    if (delayMs > 0 && !runOptions.stepDelay) {
+      runOptions.stepDelay = delayMs;
+    }
+
     try {
-      await api.runTest(test.id, inputValues, selectedSessionId ?? undefined);
+      await api.runTest(test.id, inputValues, selectedSessionId ?? undefined, runOptions);
     } catch (err) {
+      if (err instanceof api.ApiError && err.status === 409) {
+        // Another run is active (likely a stuck debug session) — offer to force-stop
+        const shouldStop = window.confirm(
+          'Another test run is active (possibly a stuck debug session).\n\nForce stop it and retry?'
+        );
+        if (shouldStop) {
+          try {
+            await api.forceStopActiveRun();
+            // Wait a moment for the run to finish cleaning up
+            await new Promise(r => setTimeout(r, 500));
+            // Retry the run
+            await api.runTest(test.id, inputValues, selectedSessionId ?? undefined, runOptions);
+          } catch (retryErr) {
+            console.error('Failed to retry after force stop:', retryErr);
+          }
+        }
+        return;
+      }
       const message =
         err instanceof api.ApiError
           ? `Failed to start test run: HTTP ${err.status}`
@@ -201,7 +256,13 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
   // Handle inputs dialog submit
   const handleInputsSubmit = (values: Record<string, unknown>) => {
     setShowInputsDialog(false);
-    executeRun(values);
+    if (pendingDebugRef.current) {
+      pendingDebugRef.current = false;
+      const delayMs = Math.round(stepDelaySec * 1000);
+      executeRun(values, { debug: true, stepDelay: delayMs });
+    } else {
+      executeRun(values);
+    }
   };
 
   // --- Inline editing: Name ---
@@ -332,25 +393,41 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
         <div className="flex items-start justify-between gap-4">
           <div className="flex-grow min-w-0">
             {/* Editable name */}
-            {editingName ? (
-              <input
-                ref={nameInputRef}
-                type="text"
-                value={nameValue}
-                onChange={(e) => setNameValue(e.target.value)}
-                onBlur={saveName}
-                onKeyDown={handleNameKeyDown}
-                className="text-2xl font-bold text-gray-900 bg-transparent border-b-2 border-blue-500 outline-none w-full"
-              />
-            ) : (
-              <h1
-                className="text-2xl font-bold text-gray-900 cursor-pointer hover:text-blue-700 transition-colors"
-                onClick={startEditingName}
-                title="Click to rename"
+            <div className="flex items-center gap-1">
+              {editingName ? (
+                <input
+                  ref={nameInputRef}
+                  type="text"
+                  value={nameValue}
+                  onChange={(e) => setNameValue(e.target.value)}
+                  onBlur={saveName}
+                  onKeyDown={handleNameKeyDown}
+                  className="text-2xl font-bold text-gray-900 bg-transparent border-b-2 border-blue-500 outline-none flex-1"
+                />
+              ) : (
+                <h1
+                  className="text-2xl font-bold text-gray-900 cursor-pointer hover:text-blue-700 transition-colors"
+                  onClick={startEditingName}
+                  title="Click to rename"
+                >
+                  {test.name}
+                </h1>
+              )}
+              <button
+                onClick={fetchTest}
+                className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                title="Refresh test from disk"
               >
-                {test.name}
-              </h1>
-            )}
+                <RefreshCw className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setShowDeleteDialog(true)}
+                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                title="Delete test"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
             <div className="flex items-center gap-3 mt-0.5">
               <span className="text-xs text-gray-500 font-mono">{test.id}</span>
               <span className="text-xs text-gray-500" title={new Date(test.updatedAt).toLocaleString()}>
@@ -387,22 +464,44 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
             </p>
           </div>
 
-          {/* Session selector + Refresh + Delete + Run buttons */}
+          {/* Controls: Session, delay, debug, run */}
           <div className="flex-shrink-0 flex items-center gap-2">
             <SessionSelector className="w-64" disabled={isRunning} />
+
+            {/* Step delay input */}
+            <div className="flex items-center gap-1">
+              <label htmlFor="step-delay" className="text-xs text-gray-500 whitespace-nowrap">
+                Delay
+              </label>
+              <input
+                id="step-delay"
+                type="number"
+                min={0}
+                step={0.5}
+                value={stepDelaySec}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value) || 0;
+                  setStepDelaySec(val);
+                  localStorage.setItem('chromedev-step-delay-sec', String(val));
+                }}
+                disabled={isRunning}
+                className="w-16 px-2 py-1 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                title="Seconds to pause between steps"
+              />
+              <span className="text-xs text-gray-400">s</span>
+            </div>
             <button
-              onClick={fetchTest}
-              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-              title="Refresh test from disk"
+              onClick={handleDebugTest}
+              disabled={isRunning || !chromeConnected}
+              className={`px-3 py-2 rounded-md font-medium text-sm transition-colors inline-flex items-center gap-1.5 ${
+                isRunning || !chromeConnected
+                  ? 'bg-amber-100 text-amber-400 cursor-not-allowed opacity-75'
+                  : 'bg-amber-500 hover:bg-amber-600 text-white cursor-pointer'
+              }`}
+              title="Run test in debug mode (pause before each step)"
             >
-              <RefreshCw className="w-5 h-5" />
-            </button>
-            <button
-              onClick={() => setShowDeleteDialog(true)}
-              className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-              title="Delete test"
-            >
-              <Trash2 className="w-5 h-5" />
+              <Bug className="w-4 h-4" />
+              Debug
             </button>
             <RunButton
               state={getRunButtonState()}
@@ -411,6 +510,9 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
           </div>
         </div>
       </div>
+
+      {/* Debug controls bar — shown when paused */}
+      <DebugControls />
 
       {/* Tabs */}
       <div className="flex-grow flex flex-col overflow-hidden">
@@ -436,7 +538,12 @@ export const TestDetail: React.FC<TestDetailProps> = ({ test: initialTest }) => 
         {/* Tab content */}
         <div className="flex-grow overflow-hidden flex flex-col">
           {activeTab === 'steps' && (
-            <StepsTab test={test} stepStatuses={stepStatuses} />
+            <StepsTab
+              test={test}
+              stepStatuses={stepStatuses}
+              pausedAtStep={pausedAtStep}
+              onRunTo={isPaused && currentRunId ? (stepIndex) => sendDebugRunTo(currentRunId, stepIndex) : undefined}
+            />
           )}
           {activeTab === 'results' && (
             <ResultsTab testId={test.id} />

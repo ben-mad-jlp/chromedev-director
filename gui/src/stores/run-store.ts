@@ -74,6 +74,8 @@ export type WsMessage =
       status: number;
       duration_ms: number;
     }
+  | { type: 'run:paused'; testId: string; runId: string; stepIndex: number; totalSteps: number }
+  | { type: 'run:resumed'; testId: string; runId: string }
   | { type: 'suite:start'; total: number }
   | { type: 'suite:test_start'; testId: string; testName: string; index: number }
   | { type: 'suite:test_complete'; testId: string; testName: string; index: number; status: 'passed' | 'failed' | 'skipped'; duration_ms: number; error?: string }
@@ -87,6 +89,8 @@ export interface RunStore {
   currentRunId: string | null;
   currentTestId: string | null;
   isRunning: boolean;
+  isPaused: boolean;
+  pausedAtStep: number | null;
   logs: LogEntry[];
   stepStatuses: Record<string, StepStatus>;
   lastCompletedTestId: string | null;
@@ -97,6 +101,7 @@ export interface RunStore {
   clearLogs: () => void;
   resetRun: () => void;
   clearLastCompleted: () => void;
+  restoreActiveRun: (testId: string, runId: string, isPaused: boolean) => void;
 }
 
 /**
@@ -107,6 +112,8 @@ export const useRunStore = create<RunStore>((set, get) => ({
   currentRunId: null,
   currentTestId: null,
   isRunning: false,
+  isPaused: false,
+  pausedAtStep: null,
   logs: [],
   stepStatuses: {},
   lastCompletedTestId: null,
@@ -125,6 +132,8 @@ export const useRunStore = create<RunStore>((set, get) => ({
           currentRunId: message.runId,
           currentTestId: message.testId,
           isRunning: true,
+          isPaused: false,
+          pausedAtStep: null,
           logs: [],
           stepStatuses: {},
           lastCompletedTestId: null,
@@ -166,10 +175,27 @@ export const useRunStore = create<RunStore>((set, get) => ({
         break;
       }
 
+      case 'run:paused': {
+        set({
+          isPaused: true,
+          pausedAtStep: message.stepIndex,
+        });
+        break;
+      }
+
+      case 'run:resumed': {
+        set({
+          isPaused: false,
+        });
+        break;
+      }
+
       case 'run:complete': {
         // Mark run as complete and remember what finished
         set({
           isRunning: false,
+          isPaused: false,
+          pausedAtStep: null,
           currentRunId: null,
           currentTestId: null,
           lastCompletedTestId: message.testId,
@@ -232,6 +258,8 @@ export const useRunStore = create<RunStore>((set, get) => ({
       currentRunId: null,
       currentTestId: null,
       isRunning: false,
+      isPaused: false,
+      pausedAtStep: null,
       logs: [],
       stepStatuses: {},
       lastCompletedTestId: null,
@@ -243,6 +271,15 @@ export const useRunStore = create<RunStore>((set, get) => ({
     set({
       lastCompletedTestId: null,
       lastCompletedRunId: null,
+    });
+  },
+
+  restoreActiveRun: (testId: string, runId: string, isPaused: boolean) => {
+    set({
+      currentRunId: runId,
+      currentTestId: testId,
+      isRunning: true,
+      isPaused,
     });
   },
 }));

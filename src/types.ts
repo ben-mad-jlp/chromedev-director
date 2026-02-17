@@ -384,7 +384,9 @@ export type RunEvent =
       url: string;
       status: number;
       duration_ms: number;
-    };
+    }
+  | { type: "debug:paused"; stepIndex: number; totalSteps: number }
+  | { type: "debug:resumed" };
 
 /**
  * Callback signature for test execution events

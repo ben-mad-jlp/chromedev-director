@@ -17,6 +17,7 @@ import { validateEdit, formatValidationResults, hasErrors, type EditChange } fro
 import { SessionManager } from "./session-manager.js";
 import { CDPClient } from "./cdp-client.js";
 import CDP from "chrome-remote-interface";
+import { DebugController } from "./debug-controller.js";
 
 /**
  * Storage interface for CRUD operations
@@ -1109,6 +1110,10 @@ If the session ID hasn't been registered, a new tab will be created automaticall
         sessionId: {
           type: "string",
           description: "Required. Session identifier for tab reuse across multiple tests. Use a consistent ID (e.g., 'my-session') to reuse the same tab. If the session hasn't been registered via register_session, a new tab will be created automatically.",
+        },
+        stepDelay: {
+          type: "number",
+          description: "Milliseconds to pause between steps (default: 0). Useful for watching test execution in the browser at a comfortable pace.",
         },
       },
       required: ["sessionId"],
@@ -2381,9 +2386,10 @@ Returns:
       // Special handling for run_test (supports two modes: testId or inline test)
       if (name === "run_test") {
         try {
-          const { test, testId, port: portArg, inputs: inputValues, sessionId: userSessionId } = args;
+          const { test, testId, port: portArg, inputs: inputValues, sessionId: userSessionId, stepDelay: stepDelayArg } = args;
           const port = (portArg as number) ?? 9222;
           const initialVars = inputValues as Record<string, unknown> | undefined;
+          const stepDelay = typeof stepDelayArg === 'number' ? stepDelayArg : 0;
 
           // Validate required sessionId
           if (!userSessionId || typeof userSessionId !== 'string' || !userSessionId.trim()) {
@@ -2414,7 +2420,8 @@ Returns:
 
             // Run the loaded test definition
             const testData = savedTest.definition;
-            const result = await runTest(testData, port, undefined, undefined, initialVars, false, sessionId, sessionManager);
+            const debugController = stepDelay > 0 ? new DebugController({ stepDelay }) : undefined;
+            const result = await runTest(testData, port, undefined, undefined, initialVars, false, sessionId, sessionManager, debugController);
 
             // Save the result
             const testRun = await storage.saveRun(testId, result);
@@ -2446,7 +2453,8 @@ Returns:
             }
 
             const testData = parseResult.data as TestDef;
-            const result = await runTest(testData, port, undefined, undefined, initialVars, false, sessionId, sessionManager);
+            const debugController2 = stepDelay > 0 ? new DebugController({ stepDelay }) : undefined;
+            const result = await runTest(testData, port, undefined, undefined, initialVars, false, sessionId, sessionManager, debugController2);
 
             // Get session tab info for diagnostics
             const targetId = sessionManager.getTargetId(sessionId);

@@ -258,6 +258,34 @@ export function sendWebSocketMessage(message: WsMessage): void {
   getWebSocketClient().send(message);
 }
 
+/**
+ * Send a debug step command via WebSocket
+ */
+export function sendDebugStep(runId: string): void {
+  getWebSocketClient().send({ type: 'debug:step', runId } as any);
+}
+
+/**
+ * Send a debug continue command via WebSocket
+ */
+export function sendDebugContinue(runId: string): void {
+  getWebSocketClient().send({ type: 'debug:continue', runId } as any);
+}
+
+/**
+ * Send a debug run-to command via WebSocket (run until a specific step)
+ */
+export function sendDebugRunTo(runId: string, stepIndex: number): void {
+  getWebSocketClient().send({ type: 'debug:run-to', runId, stepIndex } as any);
+}
+
+/**
+ * Send a debug stop command via WebSocket
+ */
+export function sendDebugStop(runId: string): void {
+  getWebSocketClient().send({ type: 'debug:stop', runId } as any);
+}
+
 export function isWebSocketConnected(): boolean {
   return getWebSocketClient().isConnected();
 }
